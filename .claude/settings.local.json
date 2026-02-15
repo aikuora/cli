@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm remove:*)",
+      "Bash(proto install:*)",
+      "Bash(pnpm add:*)",
+      "Bash(pnpm install:*)",
+      "Bash(pnpm build:*)",
+      "Bash(node:*)",
+      "Bash(pnpm --version:*)",
+      "Bash(proto use:*)",
+      "WebFetch(domain:moonrepo.dev)",
+      "WebFetch(domain:github.com)",
+      "Bash(pnpm format:*)"
+    ]
+  }
+}

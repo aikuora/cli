@@ -231,7 +231,28 @@ This document tracks implementation decisions and progress for the aikuora CLI p
 
 ### 1.3 Tool scanner: discover tools from built-in + project + custom paths
 
-**Status**: Not Started
+**Status**: ✅ Completed
+
+**Goal**: Implement a tool scanner that discovers tools from multiple sources and detects their capabilities.
+
+**Files created**:
+
+- `src/types/tool.ts`: Tool types and interfaces
+  - `ToolCapabilities`, `ToolSource`, `DiscoveredTool`, `ToolMap`
+- `src/core/capability.ts`: Capability detection (7 tests)
+  - `detectCapabilities()`, `isHybrid()`, `describeCapabilities()`
+- `src/core/scanner.ts`: Tool discovery and scanning (4 tests)
+  - `scanAllTools()`, `groupToolsByCapability()`, etc.
+- `src/core/resolver.ts`: Tool resolution (9 tests)
+  - `resolveTool()`, `toolExists()`, `getToolNames()`, `filterToolsBySource()`
+
+**Features implemented**:
+
+- ✅ Filesystem-based capability detection (no hardcoded registry)
+- ✅ Multi-source tool discovery with override logic (custom \> project \> built-in)
+- ✅ Built-in tools path resolution (works in dev and production)
+- ✅ Tool grouping and filtering utilities
+- ✅ All 24 tests passing
 
 ---
 

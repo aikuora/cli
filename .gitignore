@@ -30,3 +30,7 @@ coverage/
 .env
 .env.local
 .env.*.local
+
+# Test files
+test-*.yaml
+test-output.*

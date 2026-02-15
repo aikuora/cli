@@ -2,6 +2,36 @@
 
 This document tracks implementation decisions and progress for the aikuora CLI project.
 
+## Global Guidelines
+
+### Code Quality & Conventions
+
+**Brand-agnostic code**:
+
+- ❌ Do NOT use brand names (Aikuora, aikuora) in code identifiers
+- ✅ Use generic, descriptive names (Config, ToolConfig, etc.)
+- **Rationale**: If the project is renamed, we don't want to refactor all the code
+- **Examples**:
+  - ❌ `AikuoraConfig` → ✅ `Config`
+  - ❌ `AikuoraToolScanner` → ✅ `ToolScanner`
+  - ❌ `aikuoraConfigSchema` → ✅ `configSchema`
+
+**Code comments**:
+
+- Only comment WHY, not WHAT (code should be self-documenting)
+- Don't add internal decision comments (e.g., "brand-agnostic naming")
+- Comment complex logic, edge cases, or non-obvious behavior
+- Keep comments concise and relevant
+
+**Other conventions**:
+
+- Use Prettier for consistent formatting
+- Prefer descriptive names over abbreviations
+- Keep functions focused and single-purpose
+- Use zod for runtime validation
+
+---
+
 ## Phase 1: CLI Core + Scanner
 
 ### 1.1 Project setup: package.json, tsconfig, tsup
@@ -111,7 +141,58 @@ This document tracks implementation decisions and progress for the aikuora CLI p
 
 ### 1.2 Config manager: read/write root `aikuora.config.yaml`
 
-**Status**: Not Started
+**Status**: ✅ Completed
+
+**Goal**: Create a config manager to read and write the root `aikuora.config.yaml` file with runtime validation using zod.
+
+**Files created**:
+
+- `src/types/config.ts`: Zod schemas and TypeScript types (brand-agnostic naming)
+  - `projectConfigSchema`: Validates project name and npm scope
+  - `structureConfigSchema`: Validates directory structure (apps, packages, modules, tools)
+  - `defaultsConfigSchema`: Validates default runtime versions (node, pnpm, python, uv)
+  - `configSchema`: Complete config schema with defaults
+  - TypeScript types: `ProjectConfig`, `StructureConfig`, `DefaultsConfig`, `Config`
+- `src/managers/config.ts`: Config manager implementation
+  - `findConfigPath()`: Walk up directory tree to find config file
+  - `readConfig()`: Read, parse, and validate YAML config
+  - `writeConfig()`: Validate and write config to YAML
+  - `createDefaultConfig()`: Generate default config with sensible defaults
+  - `formatValidationError()`: Pretty-print zod validation errors
+
+**Features implemented**:
+
+- ✅ Zod schema validation with helpful error messages
+- ✅ Automatic config file discovery (walks up from cwd)
+- ✅ Safe parsing with detailed error types (not_found, invalid_yaml, validation_error, write_error)
+- ✅ Default values for all optional fields
+- ✅ Type-safe config object (TypeScript types from zod)
+- ✅ YAML formatting with proper indentation
+
+**Validation rules**:
+
+- Project name: required, non-empty string
+- Scope: optional, must match npm scope format (@scope-name)
+- Structure: all fields default to standard names
+- Defaults: all fields have sensible defaults (lts, latest, etc.)
+- Custom tools: array of file paths, defaults to empty
+
+**Testing**:
+
+- ✅ Created test script to verify functionality
+- ✅ Verified reading existing config
+- ✅ Verified creating default config
+- ✅ Verified writing config to file
+- ✅ All tests passed successfully
+
+**Refactoring (brand-agnostic code)**:
+
+- ✅ Removed "Aikuora" prefix from all types and schemas
+- ✅ `AikuoraConfig` → `Config`
+- ✅ `AikuoraConfigSchema` → `configSchema`
+- ✅ All schemas use camelCase (projectConfigSchema, structureConfigSchema, etc.)
+- ✅ Updated comments to be brand-agnostic
+- ✅ Removed test file from tsup.config.ts entry
 
 ---
 

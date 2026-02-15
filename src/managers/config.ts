@@ -2,9 +2,9 @@ import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, resolve } from 'path';
 
 import { parse, stringify } from 'yaml';
-import { ZodError } from 'zod';
+import type { ZodError } from 'zod';
 
-import { Config, configSchema } from '../types/config.js';
+import { configSchema, type Config } from '../types/config.js';
 
 /**
  * Config manager for reading and writing aikuora.config.yaml

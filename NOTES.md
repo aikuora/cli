@@ -135,6 +135,39 @@ This document tracks implementation decisions and progress for the aikuora CLI p
 - **Contains**: Editor settings (format on save, default formatter) and extension recommendations
 - **Benefit**: New team members automatically get recommended extensions and proper formatting setup
 
+**Dev tooling setup (ESLint + Vitest)**:
+
+**ESLint configuration**:
+
+- ✅ Flat config format (`eslint.config.ts`) with ESLint 9
+- ✅ TypeScript ESLint with recommended rules
+- ✅ React/Ink support (eslint-plugin-react, eslint-plugin-react-hooks)
+- ✅ TSDoc plugin for API documentation (`tsdoc/syntax`: warn)
+- ✅ Vitest plugin for test file best practices
+- ✅ Custom rules enabled:
+  - `@typescript-eslint/consistent-type-imports`: error (enforces `import type`)
+  - `@typescript-eslint/consistent-type-exports`: error (enforces `export type`)
+- ✅ Config files (`*.config.ts`) excluded from type-aware linting
+- ✅ Scripts: `lint`, `lint:fix`
+
+**Vitest configuration**:
+
+- ✅ Test framework configured with Node environment
+- ✅ Coverage provider: v8
+- ✅ Coverage formats: text, json, html
+- ✅ Test file patterns: `**/*.test.ts`, `**/*.test.tsx`
+- ✅ Scripts: `test` (watch), `test:run` (once), `test:ui` (UI), `test:coverage`
+- ✅ Sample test created for config manager (4 tests passing)
+
+**Dependencies installed**:
+
+- `eslint@9.39.2` (v9 for plugin compatibility)
+- `typescript-eslint@8.55.0` (unified TypeScript ESLint package)
+- `eslint-plugin-react`, `eslint-plugin-react-hooks` (Ink support)
+- `eslint-plugin-tsdoc` (API documentation)
+- `eslint-plugin-vitest` (test best practices)
+- `vitest@4.0.18`, `@vitest/ui` (testing framework)
+
 **Next steps**: Phase 1.2 - Config manager
 
 ---

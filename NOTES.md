@@ -341,7 +341,64 @@ aikuora init --name my-project --scope @my-scope
 
 ### 1.7 Dual output (human + JSON)
 
-**Status**: Not Started
+**Status**: ✅ Completed
+
+**Decisions**:
+
+- All commands support `--json` flag for machine-readable output
+- Human-readable output (default): Uses emojis, colors, and formatted text
+- JSON output (`--json`): Structured data for programmatic consumption
+- Output utilities centralized in `src/utils/output.ts`
+
+**Implementation**:
+
+- `output()`: Outputs JSON when `--json` flag is set
+- `outputSuccess()`: Human-readable success messages (skipped in JSON mode)
+- `outputError()`: Human-readable error messages (skipped in JSON mode)
+- `outputInfo()`: Human-readable info messages (skipped in JSON mode)
+
+**JSON output format for init command**:
+
+```json
+{
+  "action": "init",
+  "success": true,
+  "name": "project-name",
+  "scope": "@scope",
+  "projectRoot": "/path/to/project"
+}
+```
+
+On error:
+
+```json
+{
+  "action": "init",
+  "success": false,
+  "name": "project-name",
+  "scope": "@scope",
+  "error": "error message"
+}
+```
+
+**Command usage**:
+
+```bash
+# Human-readable (default)
+aikuora init --name my-project --scope @my-scope
+
+# Machine-readable JSON
+aikuora init --name my-project --scope @my-scope --json
+```
+
+**Files created**:
+
+- `src/utils/output.ts`: Dual output utilities
+
+**Files modified**:
+
+- `src/commands/init.tsx`: Added JSON output support
+- `src/index.tsx`: Pass `--json` flag to commands, suppress UI in JSON mode
 
 ---
 

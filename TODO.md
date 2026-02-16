@@ -15,9 +15,9 @@ See [PLAN.md](./PLAN.md) for detailed specifications.
 
 #### Phase 1.7 - Dual Output (Human + JSON)
 
-- [ ] Add `--json` flag support to init command
-- [ ] Return structured JSON output for programmatic usage
-- [ ] Maintain human-friendly terminal output by default
+- [x] Add `--json` flag support to init command
+- [x] Return structured JSON output for programmatic usage
+- [x] Maintain human-friendly terminal output by default
 
 #### Phase 2 - Scaffold + Link Commands
 

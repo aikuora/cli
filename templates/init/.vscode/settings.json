@@ -1,0 +1,11 @@
+{
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.formatOnSave": true,
+  "yaml.schemas": {
+    "https://moonrepo.dev/schemas/v2/project.json": "moon.yml",
+    "https://moonrepo.dev/schemas/v2/tasks.json": [".moon/tasks.yml", ".moon/tasks/**/*.yml"],
+    "https://moonrepo.dev/schemas/v2/toolchains.json": ".moon/toolchains.yml",
+    "https://moonrepo.dev/schemas/v2/workspace.json": ".moon/workspace.yml",
+    "https://moonrepo.dev/schemas/v2/template.json": "templates/**/template.yml"
+  }
+}

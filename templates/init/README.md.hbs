@@ -1,0 +1,36 @@
+# {{name}}
+
+{{#if scope}}> {{scope}}{{/if}}
+
+Monorepo managed with [Moon](https://moonrepo.dev) and [Proto](https://moonrepo.dev/proto).
+
+## Getting Started
+
+```bash
+# Install runtimes (if using Node/pnpm)
+proto install
+
+# Install dependencies (if using pnpm)
+pnpm install
+```
+
+## Structure
+
+- `apps/` - Applications
+- `packages/` - Shared packages
+- `modules/` - Modules
+- `scripts/` - Scripts
+- `tools/` - Tool configurations
+
+## Commands
+
+```bash
+# Scaffold new app
+aikuora scaffold &lt;tool&gt; --name &lt;name&gt;
+
+# Link tool to target
+aikuora link &lt;tool&gt; &lt;target&gt;
+
+# Show monorepo info
+aikuora info
+```

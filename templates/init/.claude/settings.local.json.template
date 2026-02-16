@@ -1,0 +1,19 @@
+{
+  "extraKnownMarketplaces": {
+    "skills": {
+      "source": {
+        "source": "github",
+        "repo": "aikuora/skills"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "monorepo@skills": true
+  },
+  "permissions": {
+    "allow": [
+      "Bash(proto *)",
+      "Bash(git *)"
+    ]
+  }
+}

@@ -33,6 +33,43 @@ pnpm build
 pnpm typecheck
 ```
 
+## Local Testing
+
+To use the CLI locally on your machine:
+
+```bash
+# 0. One-time setup: Configure pnpm global bin (skip if already done)
+pnpm setup
+# Then restart your terminal
+
+# 1. Build the project
+pnpm build
+
+# 2. Create a global symlink
+pnpm link --global
+
+# 3. Now you can use it anywhere on your machine
+aikuora init --name my-project
+```
+
+The `pnpm link --global` command creates a symlink from your global bin directory to the CLI in this project. Any changes you make will be reflected after rebuilding with `pnpm build`.
+
+For development with auto-rebuild:
+
+```bash
+# Terminal 1: Watch mode (rebuilds on file changes)
+pnpm dev
+
+# Terminal 2: Use the CLI
+aikuora init --name test-project
+```
+
+To unlink:
+
+```bash
+pnpm unlink --global
+```
+
 ## Commands
 
 Commands will be implemented in phases:

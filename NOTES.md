@@ -293,7 +293,49 @@ This document tracks implementation decisions and progress for the aikuora CLI p
 
 ### 1.6 `init` command
 
-**Status**: Not Started
+**Status**: ✅ Completed
+
+**Goal**: Implement the `init` command to initialize a new monorepo from scratch.
+
+**Files created**:
+
+- `src/commands/init.tsx`: Init command (refactored to use templates)
+  - `initCommand()`: Copies template and runs setup
+  - `InitCommand`: Ink component for UI feedback
+- `src/utils/template.ts`: Template utility
+  - `copyTemplate()`: Copy template directory with Handlebars rendering
+  - `getTemplatesPath()`: Get path to templates directory
+- `templates/init/`: Language-agnostic init template
+  - `.moon/workspace.yml`: Moon workspace configuration
+  - `.prototools.template`: Proto version management (with auto-install/auto-clean)
+  - `.gitignore.template`: Git ignore patterns
+  - `.claude/settings.local.json.template`: Claude Code configuration
+  - `.vscode/settings.json`: VS Code settings (Prettier + Moon YAML schemas)
+  - `.vscode/extensions.json`: Extensions (Prettier, YAML, Moon Console)
+  - `aikuora.config.yaml.hbs`: Project config (Handlebars template)
+  - `README.md.hbs`: Project README (Handlebars template)
+  - `.gitkeep` files in apps/, packages/, modules/, scripts/
+
+**Refactoring**:
+
+- ✅ Moved all hardcoded files to `templates/init/` directory
+- ✅ Uses Handlebars for templating (`.hbs` files)
+- ✅ Dotfiles renamed to `.template` extension for clarity and safety
+- ✅ Template includes Claude Code and VS Code configuration
+- ✅ VS Code YAML schemas for Moon config files
+- ✅ **Fully language-agnostic** - no pnpm, npm, or Node.js specific files
+- ✅ Removed automatic `proto install` and `pnpm install`
+- ✅ Removed `pnpm-workspace.yaml` (should be added by pnpm tool)
+- ✅ Much more maintainable - edit templates, not code
+- ✅ Added `scripts/` directory from bash script
+- ✅ Includes `templates` in package.json files field
+- ✅ Added `.prettierignore` to skip template files
+
+**Command usage**:
+
+```bash
+aikuora init --name my-project --scope @my-scope
+```
 
 ---
 

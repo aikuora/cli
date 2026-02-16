@@ -2,6 +2,8 @@
 import { render, Text } from 'ink';
 import meow from 'meow';
 
+import { InitCommand, initCommand } from './commands/init.js';
+
 const cli = meow(
   `
   Usage
@@ -62,7 +64,33 @@ function App() {
     );
   }
 
-  // Commands will be implemented in subsequent phases
+  // Handle init command
+  if (command === 'init') {
+    const { name, scope } = cli.flags;
+
+    if (!name) {
+      return <Text color="red">Error: --name is required for init command</Text>;
+    }
+
+    // Run init command asynchronously
+    initCommand({ name, scope })
+      .then((result) => {
+        if (result.success) {
+          console.log(`\n✅ Monorepo initialized at: ${result.projectRoot}`);
+        } else {
+          console.error(`\n❌ Failed to initialize: ${result.error}`);
+          process.exit(1);
+        }
+      })
+      .catch((err) => {
+        console.error(`\n❌ Unexpected error: ${err.message}`);
+        process.exit(1);
+      });
+
+    return <InitCommand name={name} scope={scope} />;
+  }
+
+  // Other commands not yet implemented
   return <Text color="yellow">Command "{command}" is not yet implemented</Text>;
 }
 

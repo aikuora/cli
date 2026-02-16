@@ -14,7 +14,8 @@
       "Bash(pnpm format:*)",
       "Bash(pnpm typecheck:*)",
       "Bash(pnpm test:run:*)",
-      "Bash(pnpm lint:*)"
+      "Bash(pnpm lint:*)",
+      "WebFetch(domain:pnpm.io)"
     ]
   }
 }

@@ -1,0 +1,16 @@
+project:
+  name: {{name}}
+{{#if scope}}  scope: "{{scope}}"
+{{/if}}
+structure:
+  apps: apps
+  packages: packages
+  modules: modules
+
+defaults:
+  node: lts
+  pnpm: latest
+  python: lts
+  uv: latest
+
+customTools: []

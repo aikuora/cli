@@ -1,0 +1,25 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/*.code-workspace
+*.swp
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+
+# Moon
+.moon/cache/
+
+# Proto
+.proto/
+
+# Claude Code
+.claude/settings.local.json

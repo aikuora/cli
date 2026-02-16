@@ -258,7 +258,30 @@ This document tracks implementation decisions and progress for the aikuora CLI p
 
 ### 1.4 Tool loader: parse and validate per-tool `aikuora.config.yaml`
 
-**Status**: Not Started
+**Status**: In Progress
+
+**Goal**: Create a loader that reads and validates per-tool configuration files.
+
+**Status**: ✅ Completed
+
+**Files created**:
+
+- `src/types/tool-config.ts`: Zod schemas for per-tool config
+  - `toolMetadataSchema`: Tool name, description, authors, version
+  - `linkableConfigSchema`: Variants and linking instructions
+  - `scaffoldableConfigSchema`: Template variables and post-scaffold hooks
+  - `toolConfigSchema`: Complete per-tool config schema
+- `src/core/loader.ts`: Tool config loader
+  - `loadToolConfig()`: Load and validate tool config from YAML
+  - `hasToolConfig()`: Check if tool has a config file
+
+**Features implemented**:
+
+- ✅ Per-tool config validation with zod
+- ✅ Support for linkable and scaffoldable configurations
+- ✅ Error handling (not_found, invalid_yaml, validation_error)
+- ✅ Default values for optional fields
+- ✅ 5 tests passing for config validation
 
 ---
 

@@ -927,26 +927,26 @@ interface ToolConfig {
 
 ### Phase 2: Scaffold + Link
 
-8. `scaffold` command with Handlebars rendering
-9. `link` command with variant support
-10. Auto-linking in scaffold (read `scaffold.devtools`)
-11. Prototools manager (auto-update `.prototools`)
-12. Moon.yml generator
-13. `add-tool` command (copy built-in to project)
+1. `scaffold` command with Handlebars rendering
+2. `link` command with variant support
+3. Auto-linking in scaffold (read `scaffold.devtools`)
+4. Prototools manager (auto-update `.prototools`)
+5. Moon.yml generator
+6. `add-tool` command (copy built-in to project)
 
 ### Phase 3: Built-in Tools
 
-14. Linkable tools: prettier, eslint, tsconfig, ruff, vite, tailwind
-15. Scaffoldable tools: nextjs, ts-library
-16. Scaffoldable tools: expo, python-library, orpc, langchain
-17. `sync`, `info`, `list` commands
+1. Linkable tools: prettier, eslint, tsconfig, ruff, vite, tailwind
+2. Scaffoldable tools: nextjs, ts-library
+3. Scaffoldable tools: expo, python-library, orpc, langchain
+4. `sync`, `info`, `list` commands
 
 ### Phase 4: Claude Code Plugin
 
-18. Minimalist skills
-19. Commands (slash commands)
-20. Monorepo-architect agent
-21. Testing + documentation
+1. Minimalist skills
+2. Commands (slash commands)
+3. Monorepo-architect agent
+4. Testing + documentation
 
 ### Phase 5: Publish
 

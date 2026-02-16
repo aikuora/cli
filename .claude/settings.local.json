@@ -11,7 +11,10 @@
       "Bash(proto use:*)",
       "WebFetch(domain:moonrepo.dev)",
       "WebFetch(domain:github.com)",
-      "Bash(pnpm format:*)"
+      "Bash(pnpm format:*)",
+      "Bash(pnpm typecheck:*)",
+      "Bash(pnpm test:run:*)",
+      "Bash(pnpm lint:*)"
     ]
   }
 }

@@ -19,20 +19,33 @@ See [PLAN.md](./PLAN.md) for detailed specifications.
 - [x] Return structured JSON output for programmatic usage
 - [x] Maintain human-friendly terminal output by default
 
-#### Phase 2 - Scaffold + Link Commands
+#### Phase 2 - `add` Command (unified)
 
-- [ ] Implement `aikuora scaffold <tool> --name <name>` command
-- [ ] Implement `aikuora link <tool> <target>` command
-- [ ] Add validation for scaffoldable/linkable tool capabilities
+- [x] Implement unified `aikuora add <tool>` command (replaces scaffold + link + add-tool)
+- [x] Scaffold mode: `aikuora add nextjs --name dashboard`
+- [x] Link mode: `aikuora add prettier apps/dashboard`
+- [x] Local fork mode: `aikuora add prettier --local`
+- [x] Add `--variant` flag for link mode
+- [x] Prototools utility (`src/utils/prototools.ts`)
+- [x] Moon.yml utility (`src/utils/moon.ts`)
+- [x] Config file renames: `aikuora.workspace.yml` + `aikuora.tool.yml`
+- [x] `dependents` field in `aikuora.tool.yml` schema
+- [x] `IntegrationHandler` API types (`src/types/integration.ts`)
+- [x] `aikuora.project.yml` schema (`src/types/project.ts`)
+- [ ] Write `aikuora.project.yml` after scaffold (record tool + type + initial devtools)
+- [ ] Write `aikuora.project.yml` after link (append tool to dependencies.tools)
+- [ ] Implement `IntegrationFs` runtime (`src/utils/integration-fs.ts`)
+- [ ] Resolve and invoke dependents/ handler when adding a project dependency
 
 #### Phase 3 - Built-in Tools
 
-- [ ] Create built-in tool templates in `tools/` directory
+- [ ] Create built-in tool templates in `tools/` directory (using `aikuora.tool.yml`)
 - [ ] Implement pnpm tool (including pnpm-workspace.yaml generation)
 - [ ] Implement prettier tool
 - [ ] Implement eslint tool
 - [ ] Implement typescript tool
-- [ ] Implement other common tools (vitest, tsup, etc.)
+- [ ] Implement other common tools (vitest, tsup, tailwind, shadcn, etc.)
+- [ ] Implement `sync`, `info`, `list` commands
 
 #### Phase 4 - Claude Code Plugin
 
@@ -57,3 +70,4 @@ See [PLAN.md](./PLAN.md) for detailed specifications.
 - [ ] Add `aikuora sync` command for synchronizing monorepo state
 - [ ] Add `aikuora info` command for showing monorepo status
 - [ ] Add `aikuora list tools` command for listing discovered tools
+- [ ] Public SDK: publish `@aikuora/sdk` with integration types for third-party tools

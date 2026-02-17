@@ -6,9 +6,36 @@ describe('Tool Config Loader', () => {
   describe('toolConfigSchema', () => {
     it('should validate minimal config', () => {
       const config = {
-        metadata: {
-          name: 'prettier',
-          description: 'Code formatter',
+        name: 'prettier',
+      };
+
+      const result = toolConfigSchema.safeParse(config);
+      expect(result.success).toBe(true);
+    });
+
+    it('should apply defaults for customizable and prototools', () => {
+      const config = {
+        name: 'tool',
+      };
+
+      const result = toolConfigSchema.safeParse(config);
+      expect(result.success).toBe(true);
+      expect(result.data?.customizable).toBe(false);
+      expect(result.data?.prototools).toEqual({});
+    });
+
+    it('should validate link config', () => {
+      const config = {
+        name: 'prettier',
+        link: {
+          dependency: true,
+          targetFile: 'prettier.config.mjs',
+          content: "export default { semi: false };",
+          variants: [
+            { name: 'default', default: true },
+            { name: 'react', forTools: ['nextjs'] },
+          ],
+          moonTask: { name: 'format', command: 'prettier --write .' },
         },
       };
 
@@ -16,17 +43,16 @@ describe('Tool Config Loader', () => {
       expect(result.success).toBe(true);
     });
 
-    it('should validate linkable config', () => {
+    it('should validate scaffold config', () => {
       const config = {
-        metadata: {
-          name: 'prettier',
-        },
-        linkable: {
-          variants: {
-            default: '.prettierrc.json',
-            yaml: '.prettierrc.yaml',
-          },
-          instructions: 'Copy config to target',
+        name: 'nextjs',
+        scaffold: {
+          type: 'app',
+          devtools: ['prettier', 'eslint'],
+          moonTasks: [
+            { name: 'dev', command: 'next dev' },
+            { name: 'build', command: 'next build' },
+          ],
         },
       };
 
@@ -34,17 +60,23 @@ describe('Tool Config Loader', () => {
       expect(result.success).toBe(true);
     });
 
-    it('should validate scaffoldable config', () => {
+    it('should validate full config with all fields', () => {
       const config = {
-        metadata: {
-          name: 'nextjs',
+        name: 'nextjs',
+        customizable: true,
+        lang: 'typescript',
+        runtime: 'node',
+        packageManager: 'pnpm',
+        prototools: { node: '20.0.0', pnpm: '9.0.0' },
+        scaffold: {
+          type: 'app',
+          devtools: ['prettier'],
+          moonTasks: [{ name: 'dev', command: 'next dev' }],
         },
-        scaffoldable: {
-          variables: {
-            name: 'string',
-            typescript: 'boolean',
-          },
-          postScaffold: 'npm install',
+        link: {
+          dependency: false,
+          targetFile: 'next.config.mjs',
+          content: 'export default {};',
         },
       };
 
@@ -52,22 +84,32 @@ describe('Tool Config Loader', () => {
       expect(result.success).toBe(true);
     });
 
-    it('should apply defaults', () => {
+    it('should reject invalid scaffold type', () => {
       const config = {
-        metadata: {
-          name: 'tool',
+        name: 'nextjs',
+        scaffold: {
+          type: 'library',
+          devtools: [],
+          moonTasks: [],
         },
       };
 
       const result = toolConfigSchema.safeParse(config);
-      expect(result.success).toBe(true);
-      expect(result.data?.metadata.authors).toEqual([]);
+      expect(result.success).toBe(false);
     });
 
-    it('should reject invalid config', () => {
+    it('should reject invalid lang', () => {
       const config = {
-        metadata: {},
+        name: 'tool',
+        lang: 'ruby',
       };
+
+      const result = toolConfigSchema.safeParse(config);
+      expect(result.success).toBe(false);
+    });
+
+    it('should reject config missing name', () => {
+      const config = {};
 
       const result = toolConfigSchema.safeParse(config);
       expect(result.success).toBe(false);

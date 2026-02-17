@@ -402,9 +402,126 @@ aikuora init --name my-project --scope @my-scope --json
 
 ---
 
-## Phase 2: Scaffold + Link
+## Phase 2: `add` Command (unified)
 
-**Status**: Not Started
+**Status**: In Progress
+
+---
+
+### 2.1 Unified `add` command
+
+**Status**: ✅ Completed
+
+**Decisions**:
+
+- `scaffold`, `link`, and `add-tool` are collapsed into a single `add` command
+- Mode is auto-detected from flags and positional arguments:
+  - `--name <n>` → scaffold mode
+  - Second positional arg (target path) → link mode
+  - `--local` flag → local fork mode (requires `customizable: true` in tool config)
+
+**Files created**:
+
+- `src/commands/add.tsx`: Add command with three modes
+- `src/utils/prototools.ts`: Read/update `.prototools` files
+- `src/utils/moon.ts`: Build/write/update `moon.yml` files
+
+**Files modified**:
+
+- `src/index.tsx`: Registered `add` command, updated help text, added `--local` flag
+
+---
+
+### 2.2 Three-file config system
+
+**Status**: ✅ Completed
+
+**Decision**: Split `aikuora.config.yaml` into three distinct files with clear, non-overlapping responsibilities.
+
+| File | Scope | Owner |
+|------|-------|-------|
+| `aikuora.workspace.yml` | Monorepo root — project name, scope, structure, defaults | User + CLI (`init`) |
+| `aikuora.tool.yml` | Per-tool — capabilities, templates, link config, dependents | Tool author |
+| `aikuora.project.yml` | Per-project — scaffold tool, type, linked tools, project deps | CLI (written automatically) |
+
+**Rationale**: The old `aikuora.config.yaml` was used for both workspace and tool config, creating ambiguity. Explicit file names make each file's role immediately clear.
+
+**Constants updated**:
+
+- `src/managers/config.ts`: `CONFIG_FILENAME = 'aikuora.workspace.yml'`
+- `src/core/loader.ts`: `TOOL_CONFIG_FILENAME = 'aikuora.tool.yml'`
+- `templates/init/aikuora.workspace.yml.hbs`: renamed from `aikuora.config.yaml.hbs`
+
+---
+
+### 2.3 `aikuora.project.yml` — per-project dependency manifest
+
+**Status**: ✅ Schema defined, write logic pending
+
+**Purpose**: Each app/package/module declares what it depends on so the CLI can reason about the dependency graph, drive reactivity, and support `aikuora sync`.
+
+```yaml
+# apps/dashboard/aikuora.project.yml
+tool: nextjs
+type: app
+dependencies:
+  tools:
+    - prettier
+    - eslint
+  projects:
+    - packages/ui
+```
+
+**Files created**:
+
+- `src/types/project.ts`: Zod schema (`projectFileSchema`) and TypeScript types
+
+**Pending**:
+
+- Write file automatically after `aikuora add <tool> --name` (scaffold mode)
+- Append to file after `aikuora add <tool> <target>` (link mode)
+
+---
+
+### 2.4 Integration handler system — `dependents/`
+
+**Status**: ✅ Types defined, runtime pending
+
+**Concept**: When a project (e.g. `apps/dashboard`) declares a dependency on a workspace package (e.g. `packages/ui`), the CLI needs to know how to wire them together. The `packages/ui` tool's `aikuora.tool.yml` declares handlers for each scaffold type it can integrate with:
+
+```yaml
+# packages/ui's aikuora.tool.yml (the shadcn tool that scaffolded it)
+dependents:
+  nextjs: nextjs.ts
+  expo: expo.ts
+```
+
+Each handler is a TypeScript file under `tools/<tool>/dependents/` that implements the `IntegrationHandler` contract:
+
+```typescript
+// tools/shadcn/dependents/nextjs.ts
+import type { IntegrationHandler } from '../src/types/integration.js';
+
+export const integrate: IntegrationHandler = async ({ target, source, fs }) => {
+  await fs.insertAfterLine(
+    `${target.path}/src/app/globals.css`,
+    /^@tailwind/,
+    `@import "${source.scopedName}/styles/globals.css";`
+  );
+};
+```
+
+**Design principle**: The knowledge of how to integrate lives in the tool (package provider), not in the consuming project. The CLI is the executor.
+
+**Files created**:
+
+- `src/types/integration.ts`: `IntegrationContext`, `IntegrationFs`, `IntegrationHandler`
+
+**Pending**:
+
+- `src/utils/integration-fs.ts`: Runtime implementation of `IntegrationFs`
+- Handler resolution: given `target.tool`, find the right `dependents/<tool>.ts` and invoke `integrate()`
+- Future: publish types as `@aikuora/sdk` for third-party tool authors
 
 ---
 

@@ -1,2 +1,6 @@
 node = "lts"
 pnpm = "latest"
+
+[settings]
+auto-install = true
+auto-clean = true

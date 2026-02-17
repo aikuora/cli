@@ -5,7 +5,7 @@ import { parse } from 'yaml';
 
 import { toolConfigSchema, type ToolConfig } from '../types/tool-config.js';
 
-export const TOOL_CONFIG_FILENAME = 'aikuora.config.yaml';
+export const TOOL_CONFIG_FILENAME = 'aikuora.tool.yml';
 
 export interface LoaderError {
   type: 'not_found' | 'invalid_yaml' | 'validation_error';

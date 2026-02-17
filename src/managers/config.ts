@@ -10,7 +10,7 @@ import { configSchema, type Config } from '../types/config.js';
  * Config manager for reading and writing aikuora.config.yaml
  */
 
-export const CONFIG_FILENAME = 'aikuora.config.yaml';
+export const CONFIG_FILENAME = 'aikuora.workspace.yml';
 
 export interface ConfigError {
   type: 'not_found' | 'invalid_yaml' | 'validation_error' | 'write_error';

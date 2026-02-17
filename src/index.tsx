@@ -2,6 +2,7 @@
 import { render, Text } from 'ink';
 import meow from 'meow';
 
+import { AddCommand, addCommand } from './commands/add.js';
 import { InitCommand, initCommand } from './commands/init.js';
 
 const cli = meow(
@@ -11,9 +12,7 @@ const cli = meow(
 
   Commands
     init              Initialize a new monorepo
-    scaffold <tool>   Scaffold a new app/package/module
-    link <tool>       Link a tool to a target
-    add-tool <tool>   Copy a built-in tool to project
+    add <tool>        Add a tool (scaffold, link, or fork)
     sync              Synchronize monorepo state
     info              Show monorepo status
     list <type>       List tools/apps/packages/modules
@@ -25,8 +24,9 @@ const cli = meow(
 
   Examples
     $ aikuora init --name my-project --scope @my-project
-    $ aikuora scaffold nextjs --name dashboard
-    $ aikuora link prettier apps/dashboard
+    $ aikuora add nextjs --name dashboard
+    $ aikuora add prettier apps/dashboard
+    $ aikuora add prettier --local
 `,
   {
     importMeta: import.meta,
@@ -43,6 +43,10 @@ const cli = meow(
       },
       variant: {
         type: 'string',
+      },
+      local: {
+        type: 'boolean',
+        default: false,
       },
     },
   }
@@ -107,6 +111,57 @@ function App() {
     // Only show UI component in human-readable mode
     if (!json) {
       return <InitCommand name={name} scope={scope} />;
+    }
+
+    return null;
+  }
+
+  // Handle add command
+  if (command === 'add') {
+    const { name, variant, local, json } = cli.flags;
+    const toolName = cli.input[1];
+    const target = cli.input[2];
+
+    if (!toolName) {
+      if (json) {
+        console.log(
+          JSON.stringify({
+            action: 'add',
+            success: false,
+            error: 'Tool name is required: aikuora add <tool>',
+          })
+        );
+        process.exit(1);
+      }
+      return <Text color="red">Error: Tool name is required: aikuora add {'<tool>'}</Text>;
+    }
+
+    // Determine mode for the Ink component
+    const mode: 'scaffold' | 'link' | 'local' = local ? 'local' : name ? 'scaffold' : 'link';
+
+    addCommand({ toolName, target, name, variant, local, json })
+      .then((result) => {
+        if (!result.success) {
+          process.exit(1);
+        }
+      })
+      .catch((err: Error) => {
+        if (json) {
+          console.log(
+            JSON.stringify({
+              action: 'add',
+              success: false,
+              error: err.message,
+            })
+          );
+        } else {
+          console.error(`\n❌ Unexpected error: ${err.message}`);
+        }
+        process.exit(1);
+      });
+
+    if (!json) {
+      return <AddCommand mode={mode} toolName={toolName} name={name} target={target} />;
     }
 
     return null;

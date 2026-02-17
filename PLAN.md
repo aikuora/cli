@@ -21,7 +21,7 @@
 | Templating engine        | Handlebars                                      |
 | Package manager (JS)     | pnpm                                            |
 | Package manager (Python) | uv                                              |
-| Config format            | YAML (per-tool + monorepo root)                 |
+| Config format            | YAML (three distinct files — see section 3.5)   |
 
 ---
 
@@ -35,36 +35,46 @@ There's no distinction between "devtool" and "scaffold template". **Everything i
 | ❌             | ✅               | **Scaffoldable** — can create new apps/packages/modules (e.g. nextjs, expo) |
 | ✅             | ✅               | **Hybrid** — both (e.g. tsconfig with base configs + per-target templates)  |
 
-**No hardcoded registry**. The CLI scans tool directories and reads each tool's `aikuora.config.yaml` to understand what it offers and how to use it.
+**No hardcoded registry**. The CLI scans tool directories and reads each tool's `aikuora.tool.yml` to understand what it offers and how to use it.
 
 ### Tool Resolution Order
 
-The CLI resolves tools from two sources, in order:
+The CLI resolves tools from three sources, in order:
 
 1. **Built-in tools** — shipped inside the CLI package (`node_modules/@aikuora/cli/tools/`)
 2. **Project tools** — in the monorepo's `tools/` directory
-3. **Custom tool paths** — declared in the root `aikuora.config.yaml`
+3. **Custom tool paths** — declared in the root `aikuora.workspace.yml`
 
-Project tools override built-ins with the same name. This allows users to fork and customize any built-in tool by simply creating a `tools/<name>/` folder with their own `aikuora.config.yaml`.
+Project tools override built-ins with the same name. This allows users to fork and customize any built-in tool by simply creating a `tools/<name>/` folder with their own `aikuora.tool.yml`.
+
+### 3.5 Config File System
+
+Three distinct YAML files, each with a clear scope:
+
+| File | Location | Purpose |
+|------|----------|---------|
+| `aikuora.workspace.yml` | Monorepo root | Project name, scope, directory structure, runtime defaults |
+| `aikuora.tool.yml` | `tools/<name>/` | Tool capabilities, link config, scaffold config, integration handlers |
+| `aikuora.project.yml` | `apps/<n>/`, `packages/<n>/`, `modules/<n>/` | Scaffold tool used, project type, tool and project dependencies |
 
 ---
 
 ## 4. Tool Anatomy
 
-Every tool is a folder with a `aikuora.config.yaml` and optional `configs/`, `templates/`, and `generators/` directories.
+Every tool is a folder with a `aikuora.tool.yml` and optional `configs/`, `templates/`, and `dependents/` directories.
 
 ### 4.1 Linkable Tool (e.g. prettier)
 
 ```
 tools/prettier/
-├── aikuora.config.yaml         # Tool metadata + linking instructions
+├── aikuora.tool.yml         # Tool metadata + linking instructions
 ├── configs/                    # Centralized config files
 │   ├── index.mjs               # export default { ... }
 │   └── package.json            # @<scope>/prettier-config
 ```
 
 ```yaml
-# tools/prettier/aikuora.config.yaml
+# tools/prettier/aikuora.tool.yml
 name: prettier
 lang: typescript
 runtime: node
@@ -90,7 +100,7 @@ link:
 
 ```
 tools/nextjs/
-├── aikuora.config.yaml         # Tool metadata + scaffold instructions
+├── aikuora.tool.yml         # Tool metadata + scaffold instructions
 ├── templates/                  # Handlebars templates
 │   ├── package.json.hbs
 │   ├── next.config.mjs.hbs
@@ -102,7 +112,7 @@ tools/nextjs/
 ```
 
 ```yaml
-# tools/nextjs/aikuora.config.yaml
+# tools/nextjs/aikuora.tool.yml
 name: nextjs
 lang: typescript
 runtime: node
@@ -138,7 +148,7 @@ scaffold:
 
 ```
 tools/tsconfig/
-├── aikuora.config.yaml
+├── aikuora.tool.yml
 ├── configs/                    # Multiple config variants
 │   ├── base.json
 │   ├── nextjs.json             # extends base
@@ -150,7 +160,7 @@ tools/tsconfig/
 ```
 
 ```yaml
-# tools/tsconfig/aikuora.config.yaml
+# tools/tsconfig/aikuora.tool.yml
 name: tsconfig
 lang: typescript
 runtime: node
@@ -187,18 +197,81 @@ link:
     command: 'tsc --noEmit'
 ```
 
-### 4.4 Python Tool (e.g. ruff)
+### 4.4 Tool with Dependents (e.g. shadcn — UI package tool)
+
+A tool that scaffolds a package other projects can consume declares integration handlers in a `dependents/` directory. The handler file name matches the scaffold tool of the consuming project.
+
+```
+tools/shadcn/
+├── aikuora.tool.yml
+├── templates/                  # Handlebars templates for the package itself
+│   ├── package.json.hbs
+│   └── src/
+│       └── index.ts.hbs
+└── dependents/                 # Integration handlers for consuming projects
+    ├── nextjs.ts               # How to wire packages/ui into a Next.js app
+    └── expo.ts                 # How to wire packages/ui into an Expo app
+```
+
+```yaml
+# tools/shadcn/aikuora.tool.yml
+name: shadcn
+lang: typescript
+runtime: node
+packageManager: pnpm
+
+prototools:
+  node: '22.x'
+  pnpm: '9.x'
+
+scaffold:
+  type: package
+  devtools:
+    - prettier
+    - eslint
+    - tailwind
+  moonTasks:
+    - name: build
+      command: 'tsup'
+
+# Maps consuming project's scaffold tool → handler file in dependents/
+dependents:
+  nextjs: nextjs.ts
+  expo: expo.ts
+```
+
+```typescript
+// tools/shadcn/dependents/nextjs.ts
+import type { IntegrationHandler } from '@aikuora/cli/types';
+
+export const integrate: IntegrationHandler = async ({ target, source, fs }) => {
+  // Import package styles in the app's global CSS
+  await fs.insertAfterLine(
+    `${target.path}/src/app/globals.css`,
+    /^@tailwind/,
+    `@import "${source.scopedName}/styles/globals.css";`
+  );
+  // Add path alias in tsconfig
+  await fs.mergeJson(`${target.path}/tsconfig.json`, {
+    compilerOptions: {
+      paths: { [`${source.scopedName}/*`]: [`${source.name}/src/*`] },
+    },
+  });
+};
+```
+
+### 4.5 Python Tool (e.g. ruff)
 
 ```
 tools/ruff/
-├── aikuora.config.yaml
+├── aikuora.tool.yml
 ├── configs/
 │   ├── ruff.toml               # Centralized ruff config
 │   └── package.json            # metadata only (consistency)
 ```
 
 ```yaml
-# tools/ruff/aikuora.config.yaml
+# tools/ruff/aikuora.tool.yml
 name: ruff
 lang: python
 runtime: python
@@ -245,53 +318,63 @@ cli/tools/                          # Shipped with the CLI package
 ├── .prototools                    # Single file, at root. Managed by CLI
 ├── .moon/
 │   └── workspace.yml              # Moonrepo config
-├── aikuora.config.yaml             # CLI config (scope, custom tool paths)
+├── aikuora.workspace.yml          # Workspace config (scope, structure, defaults)
 │
 ├── apps/                          # Deployable applications
 │   ├── web/                       # e.g.: scaffolded from tools/nextjs
+│   │   ├── aikuora.project.yml    # tool: nextjs, dependencies: [prettier, eslint]
 │   │   ├── moon.yml
 │   │   └── ...
 │   └── mobile/                    # e.g.: scaffolded from tools/expo
+│       ├── aikuora.project.yml
 │       ├── moon.yml
 │       └── ...
 │
 ├── packages/                      # Reusable internal libraries
-│   ├── ui/                        # e.g.: scaffolded from tools/ts-library
+│   ├── ui/                        # e.g.: scaffolded from tools/shadcn
+│   │   ├── aikuora.project.yml    # tool: shadcn, dependencies.tools: [tailwind]
+│   │   └── ...
 │   └── utils/
+│       ├── aikuora.project.yml
+│       └── ...
 │
 ├── modules/                       # Domain-specific packages
 │   ├── auth/                      # e.g.: scaffolded from tools/ts-library
+│   │   ├── aikuora.project.yml
+│   │   └── ...
 │   └── credit-engine/             # e.g.: scaffolded from tools/langchain
+│       ├── aikuora.project.yml
+│       └── ...
 │
 └── tools/                         # Project-level tools (override or extend built-ins)
     ├── prettier/
-    │   ├── aikuora.config.yaml
+    │   ├── aikuora.tool.yml
     │   └── configs/
     │       ├── index.mjs
     │       └── package.json
     ├── eslint/
-    │   ├── aikuora.config.yaml
+    │   ├── aikuora.tool.yml
     │   └── configs/
     │       ├── index.mjs
     │       └── package.json
     ├── tsconfig/
-    │   ├── aikuora.config.yaml
+    │   ├── aikuora.tool.yml
     │   └── configs/
     │       ├── base.json
     │       ├── nextjs.json
     │       ├── library.json
     │       └── package.json
     ├── ruff/
-    │   ├── aikuora.config.yaml
+    │   ├── aikuora.tool.yml
     │   └── configs/
     │       └── ruff.toml
     ├── vite/
-    │   ├── aikuora.config.yaml
+    │   ├── aikuora.tool.yml
     │   └── configs/
     │       ├── index.mjs
     │       └── package.json
     └── tailwind/
-        ├── aikuora.config.yaml
+        ├── aikuora.tool.yml
         └── configs/
             ├── index.mjs
             └── package.json
@@ -299,12 +382,14 @@ cli/tools/                          # Shipped with the CLI package
 
 ---
 
-## 6. Root Configuration File
+## 6. Configuration Files
 
-**Location**: `aikuora.config.yaml` at the monorepo root.
+### 6.1 `aikuora.workspace.yml` — Workspace root config
+
+**Location**: monorepo root.
 
 ```yaml
-# aikuora.config.yaml
+# aikuora.workspace.yml
 project:
   name: 'my-project'
   scope: '@my-project' # npm scope for internal packages
@@ -328,6 +413,34 @@ customTools:
   - './my-custom-tools/my-linter'
 ```
 
+### 6.2 `aikuora.project.yml` — Per-project dependency manifest
+
+**Location**: each app, package, and module directory.
+
+Written automatically by the CLI after scaffold/link operations. Can also be edited by the user to declare dependencies manually.
+
+```yaml
+# apps/dashboard/aikuora.project.yml
+tool: nextjs          # scaffold tool used to create this project
+type: app
+
+dependencies:
+  # Tool configs linked to this project (via `aikuora add <tool> <target>`)
+  tools:
+    - prettier
+    - eslint
+    - tsconfig
+  # Workspace packages this project consumes (via `aikuora add <package> <target>`)
+  # Adding an entry triggers the package's integration handler for this project
+  projects:
+    - packages/ui
+```
+
+When a project is added to `dependencies.projects`, the CLI:
+1. Reads the source project's `aikuora.project.yml` → finds its scaffold `tool`
+2. Reads that tool's `aikuora.tool.yml` → finds `dependents.<target.tool>`
+3. Runs the integration handler against the target project
+
 ---
 
 ## 7. CLI Design
@@ -336,9 +449,10 @@ customTools:
 
 ```
 aikuora init                          # Initialize monorepo from scratch
-aikuora scaffold <tool> --name <n>    # Scaffold using a scaffoldable tool
-aikuora link <tool> <target>          # Link a linkable tool to a target
-aikuora add-tool <tool>               # Copy a built-in tool to project tools/ for customization
+aikuora add <tool> --name <n>         # Scaffold using a scaffoldable tool
+aikuora add <tool> <target>           # Link a linkable tool to a target
+aikuora add <tool> --local            # Fork a built-in tool to project tools/
+aikuora add <package> <target>        # Add a workspace package as project dependency
 aikuora sync                          # Sync .prototools, workspace, and tool links
 aikuora info                          # Show monorepo status
 aikuora list tools                    # List all discovered tools and their capabilities
@@ -354,7 +468,7 @@ aikuora init --name my-project --scope @my-project
 **Deterministic actions:**
 
 1. Create directory structure (apps/, packages/, modules/, tools/)
-2. Generate `aikuora.config.yaml` with provided values
+2. Generate `aikuora.tool.yml` with provided values
 3. Generate `.prototools` with Node "lts" + pnpm "latest" (runtime-resolved aliases)
 4. Generate `.moon/workspace.yml` with project globs
 5. Generate `pnpm-workspace.yaml`
@@ -370,7 +484,7 @@ aikuora init --name my-project --scope @my-project
   "success": true,
   "project": "my-project",
   "scope": "@my-project",
-  "created": [".prototools", ".moon/workspace.yml", "aikuora.config.yaml"],
+  "created": [".prototools", ".moon/workspace.yml", "aikuora.tool.yml"],
   "runtimes": { "node": "24.13.1", "pnpm": "10.29.3" }
 }
 ```
@@ -386,11 +500,11 @@ aikuora scaffold orpc --name api-gateway
 aikuora scaffold langchain --name risk-agent
 ```
 
-Note: the `type` (app/package/module) comes from the tool's `scaffold.type` in its `aikuora.config.yaml`. No need to specify it.
+Note: the `type` (app/package/module) comes from the tool's `scaffold.type` in its `aikuora.tool.yml`. No need to specify it.
 
 **Deterministic actions:**
 
-1. Discover and load the tool's `aikuora.config.yaml`
+1. Discover and load the tool's `aikuora.tool.yml`
 2. Read root config → get scope, directory structure
 3. Determine target directory from `scaffold.type`
 4. Verify the name doesn't already exist
@@ -427,7 +541,7 @@ aikuora link tsconfig packages/utils --variant library
 
 **Actions:**
 
-1. Discover and load the tool's `aikuora.config.yaml`
+1. Discover and load the tool's `aikuora.tool.yml`
 2. Read `link` config
 3. If tool has variants, auto-detect or use `--variant` flag
 4. Add dependency in target's package.json (if `link.dependency: true`)
@@ -443,7 +557,7 @@ aikuora add-tool prettier
 **Actions:**
 
 1. Copy the built-in tool from `node_modules` to `tools/prettier/`
-2. User can now modify configs, templates, or `aikuora.config.yaml`
+2. User can now modify configs, templates, or `aikuora.tool.yml`
 3. Project tool takes precedence over the built-in
 
 ### 7.6 `sync` — Synchronize state
@@ -551,7 +665,7 @@ cli/
 ├── tsconfig.json
 ├── tools/                          # Built-in tools (shipped with CLI)
 │   ├── prettier/
-│   │   ├── aikuora.config.yaml
+│   │   ├── aikuora.tool.yml
 │   │   └── configs/
 │   ├── eslint/
 │   ├── tsconfig/
@@ -559,7 +673,7 @@ cli/
 │   ├── vite/
 │   ├── tailwind/
 │   ├── nextjs/
-│   │   ├── aikuora.config.yaml
+│   │   ├── aikuora.tool.yml
 │   │   └── templates/
 │   ├── expo/
 │   ├── ts-library/
@@ -571,10 +685,8 @@ cli/
 │   ├── index.ts                    # Entry: parse args, route to command
 │   │
 │   ├── commands/
-│   │   ├── init.ts                 # Initialize monorepo
-│   │   ├── scaffold.ts             # Scaffold from a tool
-│   │   ├── link.ts                 # Link tool to target
-│   │   ├── add-tool.ts             # Copy built-in to project
+│   │   ├── init.tsx                # Initialize monorepo
+│   │   ├── add.tsx                 # Unified add (scaffold + link + fork + project dep)
 │   │   ├── sync.ts                 # Synchronize state
 │   │   ├── info.ts                 # Show status
 │   │   └── list.ts                 # List tools/apps/packages/modules
@@ -582,25 +694,25 @@ cli/
 │   ├── core/
 │   │   ├── scanner.ts              # Filesystem scanner: discover tools
 │   │   ├── resolver.ts             # Resolve tool by name (built-in → project → custom)
-│   │   ├── loader.ts               # Load & validate aikuora.config.yaml per tool
+│   │   ├── loader.ts               # Load & validate aikuora.tool.yml per tool
 │   │   └── capability.ts           # Detect capabilities (linkable/scaffoldable/hybrid)
 │   │
-│   ├── generators/
-│   │   ├── scaffold.ts             # Render templates + copy to target
-│   │   ├── linker.ts               # Link tool config to target
-│   │   └── moon.ts                 # Generate moon.yml
-│   │
 │   ├── managers/
-│   │   ├── prototools.ts           # Read/update .prototools
-│   │   ├── workspace.ts            # Read/update workspace.yml + pnpm-workspace
-│   │   └── config.ts               # Read/update root aikuora.config.yaml
+│   │   └── config.ts               # Read/update root aikuora.workspace.yml
+│   │
+│   ├── types/
+│   │   ├── config.ts               # Workspace config schema (aikuora.workspace.yml)
+│   │   ├── tool-config.ts          # Tool config schema (aikuora.tool.yml)
+│   │   ├── project.ts              # Project manifest schema (aikuora.project.yml)
+│   │   ├── integration.ts          # IntegrationHandler API (public SDK contract)
+│   │   └── tool.ts                 # DiscoveredTool, ToolMap, ToolCapabilities
 │   │
 │   └── utils/
 │       ├── output.ts               # Dual output (human/JSON)
-│       ├── handlebars.ts           # Handlebars helpers and render
-│       ├── fs.ts                   # File system helpers
-│       ├── exec.ts                 # Shell execution helpers
-│       └── validation.ts           # Name validation, conflict detection
+│       ├── template.ts             # Handlebars template rendering
+│       ├── prototools.ts           # Read/update .prototools
+│       ├── moon.ts                 # Build/write/update moon.yml
+│       └── integration-fs.ts       # IntegrationFs runtime implementation
 │
 ├── dist/                           # Compiled output
 └── bin/
@@ -616,7 +728,7 @@ export class ToolScanner {
    * Scans all tool sources in order:
    * 1. Built-in: <cli-package>/tools/
    * 2. Project: <monorepo-root>/tools/
-   * 3. Custom: paths from aikuora.config.yaml customTools
+   * 3. Custom: paths from aikuora.workspace.yml customTools
    *
    * Returns merged map. Project overrides built-in, custom overrides project.
    */
@@ -881,7 +993,7 @@ Reduction: ~93% fewer tokens, ~87% fewer tool calls
 ### 12.2 Tool Config Schema
 
 ```typescript
-// Validated schema for aikuora.config.yaml per tool
+// Validated schema for aikuora.tool.yml per tool
 interface ToolConfig {
   name: string;
   lang: 'typescript' | 'python';
@@ -918,9 +1030,9 @@ interface ToolConfig {
 ### Phase 1: CLI Core + Scanner
 
 1. Project setup: package.json, tsconfig, tsup
-2. Config manager: read/write root `aikuora.config.yaml`
+2. Config manager: read/write root `aikuora.tool.yml`
 3. Tool scanner: discover tools from built-in + project + custom paths
-4. Tool loader: parse and validate per-tool `aikuora.config.yaml`
+4. Tool loader: parse and validate per-tool `aikuora.tool.yml`
 5. Capability detector: linkable/scaffoldable/hybrid
 6. `init` command
 7. Dual output (human + JSON)

@@ -136,8 +136,14 @@ function App() {
       return <Text color="red">Error: Tool name is required: aikuora add {'<tool>'}</Text>;
     }
 
-    // Determine mode for the Ink component
-    const mode: 'scaffold' | 'link' | 'local' = local ? 'local' : name ? 'scaffold' : 'link';
+    // Determine mode for the Ink component (heuristic: paths contain '/')
+    const mode: 'scaffold' | 'link' | 'local' | 'project' = local
+      ? 'local'
+      : name
+        ? 'scaffold'
+        : toolName.includes('/')
+          ? 'project'
+          : 'link';
 
     addCommand({ toolName, target, name, variant, local, json })
       .then((result) => {

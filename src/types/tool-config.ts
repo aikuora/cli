@@ -39,7 +39,7 @@ export const toolConfigSchema = z.object({
   /**
    * Maps scaffold tool names to integration handler file paths (relative to dependents/).
    * Used when a project declares this package as a dependency in aikuora.project.yml.
-   * e.g. { nextjs: "nextjs.ts", expo: "expo.ts" }
+   * e.g. `{ nextjs: "nextjs.ts", expo: "expo.ts" }`
    */
   dependents: z.record(z.string()).optional(),
   link: linkConfigSchema.optional(),

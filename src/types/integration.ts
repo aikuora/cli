@@ -14,7 +14,7 @@ export interface ProjectInfo {
   /** Scaffold tool used to create this project (e.g. "nextjs", "expo") */
   tool: string;
   type: 'app' | 'package' | 'module';
-  /** npm scope from workspace config (e.g. "@my-project") */
+  /** npm scope from workspace config (e.g. "\@my-project") */
   scope?: string;
 }
 
@@ -23,7 +23,7 @@ export interface SourceInfo {
   path: string;
   /** Directory name relative to workspace root (e.g. "packages/ui") */
   name: string;
-  /** Scoped package name (e.g. "@my-project/ui") */
+  /** Scoped package name (e.g. "\@my-project/ui") */
   scopedName: string;
 }
 

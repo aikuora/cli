@@ -489,15 +489,15 @@ aikuora init --name my-project --scope @my-project
 }
 ```
 
-### 7.3 `scaffold` — Create app, package, or module
+### 7.3 `add --name` — Scaffold app, package, or module
 
 ```bash
-aikuora scaffold nextjs --name dashboard
-aikuora scaffold expo --name mobile
-aikuora scaffold ts-library --name utils
-aikuora scaffold python-library --name ml-utils
-aikuora scaffold orpc --name api-gateway
-aikuora scaffold langchain --name risk-agent
+aikuora add nextjs --name dashboard
+aikuora add expo --name mobile
+aikuora add ts-library --name utils
+aikuora add python-library --name ml-utils
+aikuora add orpc --name api-gateway
+aikuora add langchain --name risk-agent
 ```
 
 Note: the `type` (app/package/module) comes from the tool's `scaffold.type` in its `aikuora.tool.yml`. No need to specify it.
@@ -513,30 +513,31 @@ Note: the `type` (app/package/module) comes from the tool's `scaffold.type` in i
 7. Auto-link devtools listed in `scaffold.devtools`
 8. Update `.prototools` if the runtime doesn't exist yet
 9. Generate `moon.yml` with tasks from `scaffold.moonTasks`
-10. Run `pnpm install` (or `uv sync` for Python)
+10. Write `aikuora.project.yml` with tool, type, and linked devtools
+11. Run `pnpm install` (or `uv sync` for Python)
 
 **Output (JSON mode):**
 
 ```json
 {
-  "action": "scaffold",
+  "action": "add",
+  "mode": "scaffold",
   "success": true,
   "tool": "nextjs",
   "name": "dashboard",
   "path": "apps/dashboard",
-  "scope": "@my-project/dashboard",
-  "toolsLinked": ["prettier", "eslint", "tsconfig", "tailwind", "vite"],
+  "linkedTools": ["prettier", "eslint", "tsconfig", "tailwind", "vite"],
   "prototoolsUpdated": false,
   "moonTasksCreated": ["dev", "build", "lint", "format", "typecheck"]
 }
 ```
 
-### 7.4 `link` — Link tool to an existing target
+### 7.4 `add <target>` — Link tool config to an existing project
 
 ```bash
-aikuora link prettier apps/dashboard
-aikuora link ruff modules/risk-agent
-aikuora link tsconfig packages/utils --variant library
+aikuora add prettier apps/dashboard
+aikuora add ruff modules/risk-agent
+aikuora add tsconfig packages/utils --variant library
 ```
 
 **Actions:**
@@ -547,20 +548,65 @@ aikuora link tsconfig packages/utils --variant library
 4. Add dependency in target's package.json (if `link.dependency: true`)
 5. Create config file from `link.content` template
 6. Update target's `moon.yml` if `link.moonTask` is defined
+7. Append tool to `dependencies.tools` in target's `aikuora.project.yml`
 
-### 7.5 `add-tool` — Copy built-in to project for customization
+**Output (JSON mode):**
+
+```json
+{
+  "action": "add",
+  "mode": "link",
+  "success": true,
+  "tool": "prettier",
+  "target": "apps/dashboard",
+  "configFile": "prettier.config.mjs",
+  "variant": null,
+  "moonTaskAdded": true
+}
+```
+
+### 7.5 `add --local` — Fork built-in tool to project
 
 ```bash
-aikuora add-tool prettier
+aikuora add prettier --local
 ```
 
 **Actions:**
 
 1. Copy the built-in tool from `node_modules` to `tools/prettier/`
 2. User can now modify configs, templates, or `aikuora.tool.yml`
-3. Project tool takes precedence over the built-in
+3. Project tool takes precedence over the built-in (requires `customizable: true`)
 
-### 7.6 `sync` — Synchronize state
+### 7.6 `add <package> <target>` — Add workspace package as project dependency
+
+```bash
+aikuora add packages/ui apps/dashboard
+aikuora add packages/ui apps/mobile
+```
+
+**Actions:**
+
+1. Read source project's `aikuora.project.yml` → get scaffold tool (e.g. "shadcn")
+2. Read target project's `aikuora.project.yml` → get scaffold tool (e.g. "nextjs")
+3. Find `dependents[target.tool]` in source tool's `aikuora.tool.yml`
+4. Load and invoke the integration handler with `IntegrationContext`
+5. Append source to `dependencies.projects` in target's `aikuora.project.yml`
+
+**Output (JSON mode):**
+
+```json
+{
+  "action": "add",
+  "mode": "project",
+  "success": true,
+  "source": "packages/ui",
+  "target": "apps/dashboard",
+  "scopedName": "@my-project/ui",
+  "handlerInvoked": true
+}
+```
+
+### 7.7 `sync` — Synchronize state
 
 ```bash
 aikuora sync
@@ -574,7 +620,7 @@ aikuora sync
 4. Verify all tool links are consistent
 5. Report inconsistencies or fix them automatically
 
-### 7.7 `info` — Monorepo status
+### 7.8 `info` — Monorepo status
 
 ```bash
 aikuora info
@@ -606,7 +652,7 @@ aikuora info --json
 }
 ```
 
-### 7.8 `list tools` — Discovered tools
+### 7.9 `list tools` — Discovered tools
 
 ```bash
 aikuora list tools
@@ -638,21 +684,21 @@ aikuora list tools --json
     my-scaffold  (custom)     → apps/       [auto-links: prettier, eslint]
 ```
 
-### 7.9 Dual Output
+### 7.10 Dual Output
 
 All commands support the `--json` flag:
 
 ```bash
 # Human-readable (default)
-aikuora scaffold nextjs --name dashboard
-# ✅ Created apps/dashboard (nextjs)
+aikuora add nextjs --name dashboard
+# ✅ Scaffolded nextjs app 'dashboard' at apps/dashboard
 # 📦 Linked tools: prettier, eslint, tsconfig, tailwind, vite
 # 🔧 moon.yml tasks: dev, build, lint, format, typecheck
 # 🚀 Run: cd apps/dashboard && moon run dashboard:dev
 
 # Machine-readable
-aikuora scaffold nextjs --name dashboard --json
-# {"action":"scaffold","success":true,...}
+aikuora add nextjs --name dashboard --json
+# {"action":"add","mode":"scaffold","success":true,...}
 ```
 
 ---
@@ -817,7 +863,7 @@ When the user wants to create a new app, package, or module in the monorepo.
 NEVER create files manually. ALWAYS use the CLI:
 
 \`\`\`bash
-aikuora scaffold <tool> --name <n> --json
+aikuora add <tool> --name <n> --json
 \`\`\`
 
 ## Interpret result
@@ -838,9 +884,9 @@ When the user wants to link, customize, or create tool configurations.
 
 1. If user says "add prettier to my app X":
    - Check if prettier is available: `aikuora list tools --json`
-   - Link it: `aikuora link prettier apps/X --json`
+   - Link it: `aikuora add prettier apps/X --json`
 2. If user wants to customize a built-in tool:
-   - Copy it: `aikuora add-tool <tool> --json`
+   - Fork it: `aikuora add <tool> --local --json`
    - Then edit files in tools/<tool>/ directly
 3. If user modifies tools/<tool>/configs/, warn it affects all consumers
 
@@ -848,8 +894,8 @@ When the user wants to link, customize, or create tool configurations.
 
 \`\`\`bash
 aikuora list tools --json
-aikuora link <tool> <target> --json
-aikuora add-tool <tool> --json
+aikuora add <tool> <target> --json
+aikuora add <tool> --local --json
 \`\`\`
 
 ## IMPORTANT
@@ -876,7 +922,7 @@ Creates a new app, package, or module in the monorepo.
 2. Run `aikuora info --json` to check current state
 3. If description given, infer tool and name
 4. If not, ask user what they need
-5. Run `aikuora scaffold <tool> --name <n> --json`
+5. Run `aikuora add <tool> --name <n> --json`
 6. Report result with suggested next step
 ```
 
@@ -909,10 +955,10 @@ a shared auth module, and an AI agent for credit risk analysis"
 
 Plan:
 
-1. `aikuora scaffold ts-library --name auth --json`
-2. `aikuora scaffold langchain --name risk-agent --json`
-3. `aikuora scaffold nextjs --name web --json`
-4. `aikuora scaffold expo --name mobile --json`
+1. `aikuora add ts-library --name auth --json`
+2. `aikuora add langchain --name risk-agent --json`
+3. `aikuora add nextjs --name web --json`
+4. `aikuora add expo --name mobile --json`
 5. Verify with `aikuora info --json`
 6. Report and suggest next steps
 
@@ -949,7 +995,7 @@ User: "Create a Next.js app called dashboard"
 │
 ├── Claude reads skill (~50 tokens)
 ├── Claude runs: aikuora info --json (~30 tokens)
-├── Claude runs: aikuora scaffold nextjs --name dashboard --json (~50 tokens)
+├── Claude runs: aikuora add nextjs --name dashboard --json (~50 tokens)
 ├── CLI executes everything deterministically (0 tokens)
 └── Claude reports JSON result (~80 tokens)
 │
@@ -1037,14 +1083,17 @@ interface ToolConfig {
 6. `init` command
 7. Dual output (human + JSON)
 
-### Phase 2: Scaffold + Link
+### Phase 2: `add` Command (unified) ✅
 
-1. `scaffold` command with Handlebars rendering
-2. `link` command with variant support
-3. Auto-linking in scaffold (read `scaffold.devtools`)
-4. Prototools manager (auto-update `.prototools`)
-5. Moon.yml generator
-6. `add-tool` command (copy built-in to project)
+1. Unified `add` command (scaffold / link / local fork / project dependency)
+2. Scaffold mode with Handlebars rendering and `aikuora.project.yml` write
+3. Link mode with variant support and `aikuora.project.yml` update
+4. Local fork mode (`--local`, requires `customizable: true`)
+5. Project dependency mode with integration handler invocation
+6. Prototools utility (auto-update `.prototools`)
+7. Moon.yml utility
+8. `IntegrationFs` runtime + `IntegrationHandler` contract
+9. Three-file config system (`aikuora.workspace.yml`, `aikuora.tool.yml`, `aikuora.project.yml`)
 
 ### Phase 3: Built-in Tools
 

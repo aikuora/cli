@@ -1,0 +1,47 @@
+name: eslint
+kind: shareable
+lang: typescript
+packageManager: pnpm
+
+workspace:
+  vscode:
+    extensions:
+      - "dbaeumer.vscode-eslint"
+    settings:
+      eslint.enable: true
+      eslint.format.enable: true
+      eslint.experimental.useFlatConfig: true
+      editor.codeActionsOnSave:
+        source.fixAll.eslint: "explicit"
+  claude:
+    hooks:
+      PostFileWrite:
+        - matcher: "*.{js,jsx,ts,tsx}"
+          command: 'pnpm exec eslint --fix "$FILE" || true'
+  moon:
+    file: typescript
+    inheritedBy:
+      toolchains:
+        or: [typescript]
+    tasks:
+      - name: lint
+        command: eslint
+        args: ['.']
+        options:
+          cache: true
+      - name: lint-fix
+        command: eslint
+        args: ['.', '--fix']
+        options:
+          cache: false
+
+link:
+  dependency: true
+  targetFile: eslint.config.mjs
+  content: "export { default } from '{{packageName}}/{{variant}}';\n"
+  variants:
+    - name: typescript
+      default: true
+    - name: nextjs
+      forTools:
+        - nextjs

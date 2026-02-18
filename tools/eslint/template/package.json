@@ -1,0 +1,13 @@
+{
+  "type": "module",
+  "dependencies": {
+    "eslint-plugin-jsdoc": "^50.6.3",
+    "eslint-plugin-tsdoc": "^0.4.0",
+    "jsonc-eslint-parser": "^2.4.0",
+    "typescript-eslint": "^8.25.0"
+  },
+  "peerDependencies": {
+    "eslint": ">=9.0.0",
+    "typescript": ">=5.0.0"
+  }
+}

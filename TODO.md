@@ -52,7 +52,7 @@ See [PLAN.md](./PLAN.md) for detailed specifications.
 - [x] Implement prettier tool
 - [ ] Create built-in tool templates in `tools/` directory (using `aikuora.tool.yml`)
 - [ ] Implement pnpm tool (including pnpm-workspace.yaml generation)
-- [ ] Implement eslint tool
+- [x] Implement eslint tool
 - [ ] Implement typescript tool
 - [ ] Implement other common tools (vitest, tsup, tailwind, shadcn, etc.)
 - [ ] Implement `sync`, `info`, `list` commands

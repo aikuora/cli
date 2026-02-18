@@ -270,12 +270,22 @@ async function ensureConfigsEntry(
     pkgJson = {
       name: configsPkgName,
       version: '0.0.0',
+      private: true,
       type: 'module',
-      exports: { './*': './src/*/index.mjs' },
+      exports: {},
     };
   } else {
     pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8')) as Record<string, unknown>;
   }
+
+  // Always ensure both export patterns are present (idempotent)
+  // "./*"   handles single-segment paths: @scope/configs/prettier → ./src/prettier/index.mjs
+  // "./*/*" handles variant paths:        @scope/configs/eslint/typescript → ./src/eslint/typescript.mjs
+  pkgJson.exports = {
+    ...((pkgJson.exports as Record<string, string>) ?? {}),
+    './*': './src/*/index.mjs',
+    './*/*': './src/*/*.mjs',
+  };
 
   // Merge dependencies from tool's template/package.json (new keys only)
   const toolPkgJsonPath = join(toolPath, 'template', 'package.json');

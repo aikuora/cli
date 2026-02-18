@@ -12,6 +12,8 @@ export const moonTaskSchema = z.object({
   name: z.string(),
   command: z.string(),
   args: z.array(z.string()).optional(),
+  /** Files/globs that trigger this task when changed (Moon's `inputs` field). */
+  inputs: z.array(z.string()).optional(),
   options: moonTaskOptionsSchema.optional(),
 });
 
@@ -84,11 +86,26 @@ export const toolConfigSchema = z.object({
   name: z.string(),
   /**
    * Determines how the tool is deployed in the workspace:
-   * - `shareable` — creates a shared package in `packages/tools/<name>` that dependents import from
-   * - `root`      — creates a single config at the workspace root
+   * - `shareable` — creates a shared package in `packages/configs/` that dependents import from
+   * - `root`      — creates workspace-level config files (pnpm-workspace.yaml, toolchain.yml, etc.)
    * - `none`      — default; scaffold/link behavior only
    */
   kind: z.enum(['shareable', 'root', 'none']).default('none'),
+  /**
+   * How the tool binary is installed. Only used for `kind: root` tools.
+   * `proto` — managed by proto; pins the version in `.prototools`.
+   */
+  installer: z.enum(['proto']).optional(),
+  /**
+   * Default version for this tool (fallback when workspace `defaults` doesn't specify it).
+   * Used with `installer: proto` to pin the version in `.prototools`.
+   */
+  version: z.string().optional(),
+  /**
+   * Other aikuora tools that must be set up before this one.
+   * e.g. `requires: [pnpm]` ensures pnpm workspace is configured before adding shared packages.
+   */
+  requires: z.array(z.string()).optional(),
   customizable: z.boolean().default(false),
   lang: z.enum(['typescript', 'python']).optional(),
   runtime: z.enum(['node', 'python']).optional(),

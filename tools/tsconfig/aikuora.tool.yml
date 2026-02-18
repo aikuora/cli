@@ -1,0 +1,37 @@
+name: tsconfig
+kind: shareable
+lang: typescript
+packageManager: pnpm
+requires:
+  - pnpm
+
+workspace:
+  vscode:
+    extensions:
+      - "ms-vscode.vscode-typescript-next"
+    settings:
+      typescript.tsdk: "node_modules/typescript/lib"
+      typescript.enablePromptUseWorkspaceTsdk: true
+      typescript.preferences.importModuleSpecifier: "relative"
+      typescript.updateImportsOnFileMove.enabled: "always"
+  moon:
+    file: typescript
+    inheritedBy:
+      toolchains:
+        or: [typescript]
+    tasks:
+      - name: typecheck
+        command: tsc
+        args: ['--noEmit']
+        inputs:
+          - 'src/**/*'
+          - 'tsconfig.json'
+
+link:
+  dependency: false
+  targetFile: tsconfig.json
+  content: |
+    {
+      "$schema": "https://json.schemastore.org/tsconfig",
+      "extends": "{{packageName}}/lib.json"
+    }

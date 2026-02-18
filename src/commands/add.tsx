@@ -17,7 +17,7 @@ import { output, outputError, outputSuccess } from '../utils/output.js';
 import { invokeIntegrationHandler } from '../utils/integration.js';
 import { updatePrototools } from '../utils/prototools.js';
 import { appendProjectDependency, appendToolDependency, readProjectFile, writeProjectFile } from '../utils/project-file.js';
-import { copyTemplate } from '../utils/template.js';
+import { copyTemplate, renderAndCopy } from '../utils/template.js';
 
 export interface AddOptions extends OutputOptions {
   toolName: string;
@@ -30,6 +30,103 @@ export interface AddOptions extends OutputOptions {
   /** Fork built-in to tools/ (requires customizable: true) */
   local?: boolean;
   cwd?: string;
+  /** Suppress all output (used when running as a dependency via `requires`) */
+  silent?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Mode R: Root tool setup (kind: root)
+// ---------------------------------------------------------------------------
+
+async function runRoot(options: AddOptions): Promise<{ success: boolean }> {
+  const { toolName, json, silent, cwd = process.cwd() } = options;
+  const projectRoot = resolve(cwd);
+
+  const configResult = readConfig();
+  if (!configResult.success) {
+    const err = configResult.error?.message ?? 'Could not read project config';
+    if (!silent) {
+      if (json) output({ action: 'add', mode: 'root', success: false, error: err }, { json });
+      else outputError(err, { json });
+    }
+    return { success: false };
+  }
+
+  const rootConfig = configResult.data!;
+  const tools = scanAllTools(projectRoot, rootConfig.customTools);
+  const discovered = resolveTool(toolName, tools);
+
+  if (!discovered) {
+    const err = `Tool '${toolName}' not found`;
+    if (!silent) {
+      if (json) output({ action: 'add', mode: 'root', success: false, error: err }, { json });
+      else outputError(err, { json });
+    }
+    return { success: false };
+  }
+
+  const loaderResult = loadToolConfig(discovered.path);
+  if (!loaderResult.success) {
+    const err = loaderResult.error?.message ?? 'Could not load tool config';
+    if (!silent) {
+      if (json) output({ action: 'add', mode: 'root', success: false, error: err }, { json });
+      else outputError(err, { json });
+    }
+    return { success: false };
+  }
+
+  const toolConfig = loaderResult.data!;
+
+  if (toolConfig.kind !== 'root') {
+    const err = `Tool '${toolName}' is not a root tool (kind: ${toolConfig.kind})`;
+    if (!silent) {
+      if (json) output({ action: 'add', mode: 'root', success: false, error: err }, { json });
+      else outputError(err, { json });
+    }
+    return { success: false };
+  }
+
+  // Render template/ files to project root (idempotent — overwrites with deterministic content)
+  const templateDir = join(discovered.path, 'template');
+  if (existsSync(templateDir)) {
+    const context = {
+      structure: rootConfig.structure,
+      defaults: rootConfig.defaults,
+      project: rootConfig.project,
+    };
+    await renderAndCopy(templateDir, projectRoot, context as Record<string, unknown>);
+  }
+
+  // Pin version in .prototools (idempotent — skips existing keys)
+  if (toolConfig.installer === 'proto') {
+    const defaults = rootConfig.defaults as Record<string, string>;
+    const version = defaults[toolName] ?? toolConfig.version ?? 'latest';
+    await updatePrototools(join(projectRoot, '.prototools'), { [toolName]: version });
+  }
+
+  // Apply workspace settings (vscode, claude hooks, moon tasks)
+  if (toolConfig.workspace) {
+    await applyWorkspaceSettings(projectRoot, toolConfig.workspace);
+  }
+
+  const result = { action: 'add', mode: 'root', success: true, tool: toolName };
+
+  if (!silent) {
+    if (json) output(result, { json });
+    else outputSuccess(`Configured ${toolName} at workspace root`, { json });
+  }
+
+  return { success: true };
+}
+
+/**
+ * Ensure all tools listed in `requires` are set up as root tools before proceeding.
+ * Runs silently — the caller is responsible for reporting its own success.
+ */
+async function ensureRequiredTools(requires: string[], baseOptions: AddOptions): Promise<void> {
+  for (const reqTool of requires) {
+    await runRoot({ ...baseOptions, toolName: reqTool, silent: true });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -278,13 +375,22 @@ async function ensureConfigsEntry(
     pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8')) as Record<string, unknown>;
   }
 
-  // Always ensure both export patterns are present (idempotent)
-  // "./*"   handles single-segment paths: @scope/configs/prettier → ./src/prettier/index.mjs
-  // "./*/*" handles variant paths:        @scope/configs/eslint/typescript → ./src/eslint/typescript.mjs
+  // Always ensure all managed export patterns are present and in the correct order.
+  // More-specific patterns must come before less-specific ones — Node.js resolves
+  // the first matching pattern, so "./*/*.json" must precede "./*/*" to prevent
+  // the generic pattern from capturing JSON paths like `tsconfig/base.json`.
+  //
+  //  "./*"        single-segment:  @scope/configs/prettier          → ./src/prettier/index.mjs
+  //  "./*/*.json" JSON variants:   @scope/configs/tsconfig/base.json → ./src/tsconfig/base.json
+  //  "./*/*"      JS variants:     @scope/configs/eslint/typescript  → ./src/eslint/typescript.mjs
+  const { './*': _a, './*/*.json': _b, './*/*': _c, ...customExports } = (
+    pkgJson.exports as Record<string, string>
+  ) ?? {};
   pkgJson.exports = {
-    ...((pkgJson.exports as Record<string, string>) ?? {}),
     './*': './src/*/index.mjs',
+    './*/*.json': './src/*/*.json',
     './*/*': './src/*/*.mjs',
+    ...customExports,
   };
 
   // Merge dependencies from tool's template/package.json (new keys only)
@@ -363,6 +469,12 @@ async function runShareable(options: AddOptions) {
   }
 
   const toolConfig = loaderResult.data!;
+
+  // Ensure required tools (e.g. pnpm) are set up before creating shared packages
+  if (toolConfig.requires && toolConfig.requires.length > 0) {
+    await ensureRequiredTools(toolConfig.requires, options);
+  }
+
   const scope = rootConfig.project.scope;
   const { created, packageName, path: entryPath } = await ensureConfigsEntry(
     toolName,
@@ -436,6 +548,11 @@ async function runLink(options: AddOptions) {
   }
 
   const toolConfig = loaderResult.data!;
+
+  // Ensure required tools (e.g. pnpm) are set up before linking
+  if (toolConfig.requires && toolConfig.requires.length > 0) {
+    await ensureRequiredTools(toolConfig.requires, options);
+  }
 
   if (!toolConfig.link) {
     const err = `Tool '${toolName}' does not support link mode`;
@@ -714,12 +831,7 @@ export async function addCommand(options: AddOptions) {
       if (loaderResult.success) {
         const kind = loaderResult.data?.kind;
         if (kind === 'shareable') return runShareable(options);
-        if (kind === 'root') {
-          const err = `'root' kind is not yet implemented`;
-          if (json) output({ action: 'add', success: false, error: err }, { json });
-          else outputError(err, { json });
-          return { success: false };
-        }
+        if (kind === 'root') return runRoot(options);
       }
     }
   }

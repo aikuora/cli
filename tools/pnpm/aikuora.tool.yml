@@ -1,0 +1,4 @@
+name: pnpm
+kind: root
+installer: proto
+version: latest

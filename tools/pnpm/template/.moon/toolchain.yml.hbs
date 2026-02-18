@@ -1,0 +1,10 @@
+$schema: 'https://moonrepo.dev/schemas/toolchain.json'
+
+# Configures the Node.js runtime and pnpm package manager.
+# Moon uses this to install dependencies and run tasks.
+# See: https://moonrepo.dev/docs/config/toolchain
+node:
+  version: '{{defaults.node}}'
+  packageManager: 'pnpm'
+  pnpm:
+    version: '{{defaults.pnpm}}'

@@ -14,6 +14,19 @@ export function getTemplatesPath(): string {
 }
 
 /**
+ * Render and copy an arbitrary source directory to a destination.
+ * Works identically to copyTemplate but accepts an absolute source path
+ * (useful for tool template/ directories outside of templates/).
+ */
+export async function renderAndCopy(
+  sourceDir: string,
+  destination: string,
+  variables: Record<string, unknown> = {}
+): Promise<void> {
+  await copyDirectory(sourceDir, destination, variables);
+}
+
+/**
  * Copy template directory to destination, rendering Handlebars templates
  */
 export async function copyTemplate(

@@ -51,10 +51,18 @@ See [PLAN.md](./PLAN.md) for detailed specifications.
 - [x] Removed `tools/` dir creation from `init`
 - [x] Implement prettier tool
 - [ ] Create built-in tool templates in `tools/` directory (using `aikuora.tool.yml`)
-- [ ] Implement pnpm tool (including pnpm-workspace.yaml generation)
+- [x] Implement pnpm tool (pnpm-workspace.yaml + .moon/toolchain.yml)
+- [x] Add `requires` field to tool schema (auto-setup dependencies)
 - [x] Implement eslint tool
-- [ ] Implement typescript tool
-- [ ] Implement other common tools (vitest, tsup, tailwind, shadcn, etc.)
+- [x] Implement tsconfig tool
+- [ ] Implement nextjs tool — scaffold in `apps/`, devtools: prettier + eslint + tsconfig
+- [ ] Implement vitest tool — shareable config in `packages/configs/src/vitest/`, moon tasks: test + test-watch
+- [ ] Implement tsup tool — shareable config in `packages/configs/src/tsup/`, moon tasks: build
+- [ ] Implement tailwind tool — shareable config in `packages/configs/src/tailwind/`, PostCSS integration
+- [ ] Implement shadcn tool — links shadcn/ui config to a Next.js app (variant: nextjs)
+- [ ] Implement commitlint tool — kind: root, shareable config, git hook via lefthook
+- [ ] Implement lefthook tool — kind: root, installs lefthook.yml at workspace root
+- [ ] Implement release-please tool — kind: root, release-please-config.json + .release-please-manifest.json
 - [ ] Implement `sync`, `info`, `list` commands
 
 #### Phase 4 - Claude Code Plugin

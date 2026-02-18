@@ -1,36 +1,41 @@
 # {{name}}
 
-{{#if scope}}> {{scope}}{{/if}}
+{{#if scope}}> Scope: `{{scope}}`
 
+{{/if}}
 Monorepo managed with [Moon](https://moonrepo.dev) and [Proto](https://moonrepo.dev/proto).
 
 ## Getting Started
 
 ```bash
-# Install runtimes (if using Node/pnpm)
+# Install runtimes via proto
 proto install
 
-# Install dependencies (if using pnpm)
+# Install dependencies
 pnpm install
+
+# Run all tasks
+moon run :build
 ```
 
 ## Structure
 
-- `apps/` - Applications
-- `packages/` - Shared packages
-- `modules/` - Modules
-- `scripts/` - Scripts
-- `tools/` - Tool configurations
+- `{{structure.apps}}/` — Applications
+- `{{structure.packages}}/` — Shared packages and configs
+- `{{structure.modules}}/` — Modules
 
-## Commands
+## Adding tools
 
 ```bash
-# Scaffold new app
-aikuora scaffold &lt;tool&gt; --name &lt;name&gt;
+# Set up a tool workspace-wide (e.g. prettier, eslint, tsconfig)
+aikuora add prettier
 
-# Link tool to target
-aikuora link &lt;tool&gt; &lt;target&gt;
+# Scaffold a new app
+aikuora add nextjs --name my-app
 
-# Show monorepo info
-aikuora info
+# Link a tool config to an existing project
+aikuora add prettier apps/my-app
+
+# Fork a built-in tool to customize it locally
+aikuora add prettier --local
 ```

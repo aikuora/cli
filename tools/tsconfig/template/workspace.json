@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./base.json",
+  "include": [
+    "${configDir}/eslint.config.ts",
+    "${configDir}/prettier.config.mjs",
+    "${configDir}/prettier.config.mts",
+    "${configDir}/commitlint.config.ts",
+    "${configDir}/vitest.config.ts",
+    "${configDir}/vite.config.ts",
+    "${configDir}/tsup.config.ts",
+    "${configDir}/jest.config.ts",
+    "${configDir}/.tools/*.{ts,mjs,mts}"
+  ]
+}

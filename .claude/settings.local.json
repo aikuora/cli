@@ -15,7 +15,8 @@
       "Bash(pnpm typecheck:*)",
       "Bash(pnpm test:run:*)",
       "Bash(pnpm lint:*)",
-      "WebFetch(domain:pnpm.io)"
+      "WebFetch(domain:pnpm.io)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   },
   "statusLine": {

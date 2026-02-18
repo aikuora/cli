@@ -2,6 +2,7 @@ import { resolve } from 'path';
 
 import { Text } from 'ink';
 
+import { createDefaultConfig } from '../managers/config.js';
 import type { OutputOptions } from '../utils/output.js';
 import { output, outputError, outputSuccess } from '../utils/output.js';
 import { copyTemplate } from '../utils/template.js';
@@ -17,8 +18,17 @@ export async function initCommand(options: InitOptions) {
   const projectRoot = resolve(cwd);
 
   try {
+    // Build template context from default config so .hbs files have access to structure/defaults
+    const defaultConfig = createDefaultConfig(name, scope);
+    const templateContext = {
+      name,
+      scope,
+      structure: defaultConfig.structure,
+      defaults: defaultConfig.defaults,
+    };
+
     // Copy init template with Handlebars variables
-    await copyTemplate('init', projectRoot, { name, scope });
+    await copyTemplate('init', projectRoot, templateContext);
 
     const result = {
       action: 'init',

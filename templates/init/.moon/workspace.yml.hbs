@@ -1,0 +1,13 @@
+$schema: 'https://moonrepo.dev/schemas/v2/workspace.json'
+
+projects:
+  - '{{structure.apps}}/*'
+  - '{{structure.packages}}/*'
+  - '{{structure.modules}}/*'
+
+vcs:
+  client: 'git'
+  defaultBranch: 'main'
+  provider: 'github'
+
+telemetry: false

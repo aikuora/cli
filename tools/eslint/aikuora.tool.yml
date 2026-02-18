@@ -2,6 +2,8 @@ name: eslint
 kind: shareable
 lang: typescript
 packageManager: pnpm
+requires:
+  - pnpm
 
 workspace:
   vscode:

@@ -1,0 +1,36 @@
+name: prettier
+kind: shareable
+lang: typescript
+packageManager: pnpm
+
+workspace:
+  vscode:
+    extensions:
+      - "esbenp.prettier-vscode"
+    settings:
+      editor.defaultFormatter: "esbenp.prettier-vscode"
+      editor.formatOnSave: true
+  claude:
+    hooks:
+      PostFileWrite:
+        - matcher: "*.{js,jsx,ts,tsx,mjs,cjs,json,md,css,scss,yaml,yml}"
+          command: 'pnpm exec prettier --write "$FILE"'
+  moon:
+    file: typescript
+    inheritedBy:
+      toolchains:
+        or: [typescript]
+    tasks:
+      - name: format
+        command: prettier
+        args: ['--write', '.']
+        options:
+          cache: false
+      - name: format-check
+        command: prettier
+        args: ['--check', '.']
+
+link:
+  dependency: true
+  targetFile: prettier.config.mjs
+  content: "export { default } from '{{packageName}}';\n"

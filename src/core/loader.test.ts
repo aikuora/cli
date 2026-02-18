@@ -35,7 +35,7 @@ describe('Tool Config Loader', () => {
             { name: 'default', default: true },
             { name: 'react', forTools: ['nextjs'] },
           ],
-          moonTask: { name: 'format', command: 'prettier --write .' },
+          moonTasks: [{ name: 'format', command: 'prettier --write .' }],
         },
       };
 
@@ -111,6 +111,26 @@ describe('Tool Config Loader', () => {
     it('should reject config missing name', () => {
       const config = {};
 
+      const result = toolConfigSchema.safeParse(config);
+      expect(result.success).toBe(false);
+    });
+
+    it('should apply default kind of none', () => {
+      const config = { name: 'prettier' };
+      const result = toolConfigSchema.safeParse(config);
+      expect(result.success).toBe(true);
+      expect(result.data?.kind).toBe('none');
+    });
+
+    it('should accept shareable kind', () => {
+      const config = { name: 'prettier', kind: 'shareable' };
+      const result = toolConfigSchema.safeParse(config);
+      expect(result.success).toBe(true);
+      expect(result.data?.kind).toBe('shareable');
+    });
+
+    it('should reject invalid kind', () => {
+      const config = { name: 'tool', kind: 'global' };
       const result = toolConfigSchema.safeParse(config);
       expect(result.success).toBe(false);
     });

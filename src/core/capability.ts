@@ -7,11 +7,13 @@ import type { ToolCapabilities } from '../types/tool.js';
  * Detect tool capabilities by checking for specific directories
  */
 export function detectCapabilities(toolPath: string): ToolCapabilities {
-  const configsPath = join(toolPath, 'configs');
+  // template/ (singular) → content added to packages/configs/ (shareable tools)
+  // templates/ (plural)  → project scaffolding templates
+  const templatePath = join(toolPath, 'template');
   const templatesPath = join(toolPath, 'templates');
 
   return {
-    linkable: existsSync(configsPath),
+    linkable: existsSync(templatePath),
     scaffoldable: existsSync(templatesPath),
   };
 }

@@ -32,16 +32,26 @@ See [PLAN.md](./PLAN.md) for detailed specifications.
 - [x] `dependents` field in `aikuora.tool.yml` schema
 - [x] `IntegrationHandler` API types (`src/types/integration.ts`)
 - [x] `aikuora.project.yml` schema (`src/types/project.ts`)
-- [ ] Write `aikuora.project.yml` after scaffold (record tool + type + initial devtools)
-- [ ] Write `aikuora.project.yml` after link (append tool to dependencies.tools)
-- [ ] Implement `IntegrationFs` runtime (`src/utils/integration-fs.ts`)
-- [ ] Resolve and invoke dependents/ handler when adding a project dependency
+- [x] Write `aikuora.project.yml` after scaffold (record tool + type + initial devtools)
+- [x] Write `aikuora.project.yml` after link (append tool to dependencies.tools)
+- [x] Implement `IntegrationFs` runtime (`src/utils/integration-fs.ts`)
+- [x] Resolve and invoke dependents/ handler when adding a project dependency
 
 #### Phase 3 - Built-in Tools
 
+- [x] `kind: shareable | root | none` field in tool schema
+- [x] Consolidated `packages/configs/` package for TypeScript tools (wildcard exports)
+- [x] Renamed `configs/` → `template/` for tool content (capability detection updated)
+- [x] `workspace` config in `aikuora.tool.yml` (vscode, claude, moon)
+- [x] Moon task inheritance system (`workspace.moon` → `.moon/tasks/<file>.yml`)
+- [x] `moonTasks` plural in `linkConfig` + `args`/`options` support in `moonTaskSchema`
+- [x] `runShareable` mode in `add` command
+- [x] `applyWorkspaceSettings` (merges vscode settings, extensions, claude hooks, moon tasks)
+- [x] Fixed `getBuiltInToolsPath()` context-aware resolution
+- [x] Removed `tools/` dir creation from `init`
+- [x] Implement prettier tool
 - [ ] Create built-in tool templates in `tools/` directory (using `aikuora.tool.yml`)
 - [ ] Implement pnpm tool (including pnpm-workspace.yaml generation)
-- [ ] Implement prettier tool
 - [ ] Implement eslint tool
 - [ ] Implement typescript tool
 - [ ] Implement other common tools (vitest, tsup, tailwind, shadcn, etc.)

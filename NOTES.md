@@ -456,7 +456,7 @@ aikuora init --name my-project --scope @my-scope --json
 
 ### 2.3 `aikuora.project.yml` — per-project dependency manifest
 
-**Status**: ✅ Schema defined, write logic pending
+**Status**: ✅ Completed
 
 **Purpose**: Each app/package/module declares what it depends on so the CLI can reason about the dependency graph, drive reactivity, and support `aikuora sync`.
 
@@ -476,16 +476,16 @@ dependencies:
 
 - `src/types/project.ts`: Zod schema (`projectFileSchema`) and TypeScript types
 
-**Pending**:
+**Implemented**:
 
-- Write file automatically after `aikuora add <tool> --name` (scaffold mode)
-- Append to file after `aikuora add <tool> <target>` (link mode)
+- Written automatically after `aikuora add <tool> --name` (scaffold mode)
+- Appended automatically after `aikuora add <tool> <target>` (link mode via `appendToolDependency`)
 
 ---
 
 ### 2.4 Integration handler system — `dependents/`
 
-**Status**: ✅ Types defined, runtime pending
+**Status**: ✅ Completed
 
 **Concept**: When a project (e.g. `apps/dashboard`) declares a dependency on a workspace package (e.g. `packages/ui`), the CLI needs to know how to wire them together. The `packages/ui` tool's `aikuora.tool.yml` declares handlers for each scaffold type it can integrate with:
 
@@ -516,18 +516,241 @@ export const integrate: IntegrationHandler = async ({ target, source, fs }) => {
 **Files created**:
 
 - `src/types/integration.ts`: `IntegrationContext`, `IntegrationFs`, `IntegrationHandler`
-
-**Pending**:
-
 - `src/utils/integration-fs.ts`: Runtime implementation of `IntegrationFs`
-- Handler resolution: given `target.tool`, find the right `dependents/<tool>.ts` and invoke `integrate()`
+- `src/utils/project-file.ts`: Read/write `aikuora.project.yml` (`appendToolDependency`, etc.)
+
+**Implemented**:
+
+- Handler resolution: given `target.tool`, finds the right `dependents/<tool>.ts` and invokes `integrate()` via `invokeIntegrationHandler`
 - Future: publish types as `@aikuora/sdk` for third-party tool authors
 
 ---
 
 ## Phase 3: Built-in Tools
 
-**Status**: Not Started
+**Status**: In Progress
+
+---
+
+### 3.1 Tool deployment: `kind` field
+
+**Status**: ✅ Completed
+
+**Decision**: Added a `kind` enum to `aikuora.tool.yml` to control how a tool's shareable config is deployed at the workspace level.
+
+| Value | Behavior |
+|-------|----------|
+| `shareable` | Creates/updates the consolidated `packages/configs/` package. Tool content goes to `packages/configs/src/<name>/`. Applies `workspace` settings (vscode, claude, moon). |
+| `root` | Creates config at workspace root. Not yet implemented. |
+| `none` | Default. Existing scaffold/link behavior — no shared package created. |
+
+The `kind` field is optional and defaults to `none`, making it backward-compatible with all existing tool definitions.
+
+---
+
+### 3.2 Consolidated `packages/configs/` package
+
+**Status**: ✅ Completed
+
+**Decision**: Instead of creating individual npm packages per tool (e.g., `@scope/prettier-config`, `@scope/eslint-config`), all TypeScript shareable tools contribute to a single `packages/configs/` package.
+
+**Rationale**: One package with wildcard exports is simpler to consume (`@scope/configs/prettier`, `@scope/configs/eslint`) and avoids managing multiple internal package versions. New tools are added by dropping a directory — no new package.json at the package level.
+
+**Package structure**:
+
+```
+packages/configs/
+  package.json      # name: "@scope/configs", exports: { "./*": "./src/*/index.mjs" }
+  src/
+    prettier/
+      index.mjs     # prettier config
+    eslint/
+      index.mjs     # eslint config
+```
+
+**`package.json` exports field**:
+
+```json
+{
+  "name": "@scope/configs",
+  "exports": {
+    "./*": "./src/*/index.mjs"
+  }
+}
+```
+
+**Dependency merging**: Each tool's `template/package.json` declares its own dependencies. When `runShareable` runs, it deep-merges these into `packages/configs/package.json` (auto-merge, new keys only — existing values are never overwritten).
+
+**Consumer usage**:
+
+```js
+import config from "@scope/configs/prettier";
+import { rules } from "@scope/configs/eslint";
+```
+
+---
+
+### 3.3 `template/` directory (renamed from `configs/`)
+
+**Status**: ✅ Completed
+
+**Decision**: The `configs/` directory inside a tool has been renamed to `template/` (singular). The `templates/` directory (plural) retains its meaning for Handlebars scaffolding.
+
+| Directory | Capability | Description |
+|-----------|-----------|-------------|
+| `template/` | `linkable: true` | Shareable config content. Goes to `packages/configs/src/<name>/` for `kind: shareable` tools, or linked directly for `kind: none`. |
+| `templates/` | `scaffoldable: true` | Handlebars project templates for `aikuora add <tool> --name`. |
+
+**Rationale**: `template/` (singular) makes it unambiguous that this is the single source-of-truth config, not a collection of project templates. The rename also prevents confusion when exploring the tool directory.
+
+**Capability detection updated** in `src/core/capability.ts`:
+
+```typescript
+export function detectCapabilities(toolDir: string): ToolCapabilities {
+  return {
+    linkable: existsSync(join(toolDir, "template")),   // singular
+    scaffoldable: existsSync(join(toolDir, "templates")), // plural
+  };
+}
+```
+
+---
+
+### 3.4 `workspace` config in `aikuora.tool.yml`
+
+**Status**: ✅ Completed
+
+**Decision**: Tools declare workspace-level integrations in a `workspace` block. These are applied once when the tool is installed via `aikuora add <tool>` (shareable mode) and are idempotent — running the command again does not duplicate entries.
+
+**Three sub-configs**:
+
+**`vscode`**: Merges into `.vscode/settings.json` and `.vscode/extensions.json`.
+
+```yaml
+workspace:
+  vscode:
+    extensions:
+      - esbenp.prettier-vscode
+    settings:
+      editor.defaultFormatter: "esbenp.prettier-vscode"
+      editor.formatOnSave: true
+```
+
+- `vscode.settings`: Deep-merged into `.vscode/settings.json` (existing keys preserved)
+- `vscode.extensions`: Appended to `.vscode/extensions.json` recommendations list (deduplicates)
+
+**`claude`**: Merges hooks into `.claude/settings.json`.
+
+```yaml
+workspace:
+  claude:
+    hooks:
+      PostFileWrite:
+        - matcher: "*.{js,jsx,ts,tsx,mjs,cjs,json,md,css,scss,yaml,yml}"
+          command: 'pnpm exec prettier --write "$FILE"'
+```
+
+- Hooks are deduplicated by `command` string — adding the same tool twice does not create duplicate hooks.
+
+**`moon`**: Writes tasks to `.moon/tasks/<file>.yml` using Moon's task inheritance system.
+
+```yaml
+workspace:
+  moon:
+    file: typescript
+    inheritedBy:
+      toolchains:
+        or: [typescript]
+    tasks:
+      - name: format
+        command: prettier
+        args: ['--write', '.']
+        options:
+          cache: false
+      - name: format-check
+        command: prettier
+        args: ['--check', '.']
+```
+
+- See section 3.5 for Moon task inheritance details.
+
+**Implementation**: `applyWorkspaceSettings()` in `src/commands/add.tsx` orchestrates all three merges. Helper functions: `mergeJsonFile()`, `mergeVscodeExtensions()`, `mergeClaudeHooks()`.
+
+---
+
+### 3.5 Moon task inheritance
+
+**Status**: ✅ Completed
+
+**Decision**: Tasks for linkable/shareable tools go to `.moon/tasks/<lang>.yml` (workspace-level inheritance file) instead of each project's `moon.yml`.
+
+**Rationale**: Moon's `inheritedBy` system lets a single task definition propagate automatically to all matching projects. This is far more scalable than writing the same task into every `moon.yml` at link time. A single `format` task in `.moon/tasks/typescript.yml` reaches all TypeScript projects.
+
+**How it works**:
+
+```yaml
+# .moon/tasks/typescript.yml (written by CLI)
+$schema: 'https://moonrepo.dev/schemas/tasks.json'
+
+implicitDeps: []
+
+tasks:
+  format:
+    command: prettier
+    args: ['--write', '.']
+    options:
+      cache: false
+  format-check:
+    command: prettier
+    args: ['--check', '.']
+```
+
+Moon reads this file and applies tasks to all projects matching the `inheritedBy` selector in `aikuora.tool.yml`. The CLI only sets `inheritedBy` when creating the file for the first time — existing `inheritedBy` config is preserved on subsequent runs.
+
+**`moonTaskSchema` extensions**: The schema now supports `args?: string[]` and `options?: { cache?: boolean }` fields to match Moon's full task format.
+
+**`moonTasks` plural**: `linkConfig.moonTasks` (plural) replaces the old `moonTask` (singular) to allow tools to declare multiple tasks in a single config.
+
+**Implementation**: `addInheritedMoonTasks(workspaceRoot, inheritance)` in `src/utils/moon.ts` creates or updates `.moon/tasks/<file>.yml`.
+
+---
+
+### 3.6 First built-in tool: `prettier`
+
+**Status**: ✅ Completed
+
+**Files**:
+
+```
+tools/prettier/
+├── aikuora.tool.yml      # kind: shareable, workspace config (vscode + claude + moon), link config
+└── template/
+    ├── index.mjs         # prettier config using @ianvs/prettier-plugin-sort-imports
+    └── package.json      # dependencies: { "@ianvs/prettier-plugin-sort-imports": "^4.4.2" }
+                          # devDependencies: { prettier: "^3.5.1" }
+```
+
+**`aikuora.tool.yml`**:
+
+- `kind: shareable` — contributes to `packages/configs/src/prettier/`
+- `workspace.vscode`: recommends `esbenp.prettier-vscode`, sets `editor.defaultFormatter` and `editor.formatOnSave`
+- `workspace.claude`: adds PostFileWrite hook to run `prettier --write "$FILE"` on all JS/TS/JSON/MD/CSS/YAML files
+- `workspace.moon`: writes `format` and `format-check` tasks to `.moon/tasks/typescript.yml`
+
+**New schema types exported** from `src/types/tool-config.ts`:
+
+- `MoonTaskOptions`, `MoonInheritance`, `ClaudeHookEntry`, `WorkspaceConfig`
+
+**New `add` command mode**:
+
+- `runShareable`: invoked when `aikuora add <tool>` is called with no target, no `--name`, and no `--local` for a tool with `kind: shareable`. Creates `packages/configs/src/<name>/` and calls `applyWorkspaceSettings()`.
+- Ink display mode `'install'`: shows "Installing prettier…" (instead of the link-mode "Linking prettier to undefined").
+
+**`getBuiltInToolsPath()` bug fix**: Now detects execution context by checking the parent directory name:
+- Parent dir is `dist/` (bundled production): goes up 1 level to reach CLI root
+- Parent dir is `src/core/` (dev/test): goes up 2 levels to reach CLI root
+
+**`init` command change**: `tools/` directory is no longer created by `initCommand`. The `tools/` directory only appears when the user explicitly runs `aikuora add <tool> --local`.
 
 ---
 

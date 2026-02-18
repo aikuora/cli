@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, statSync } from 'fs';
-import { dirname, join, resolve } from 'path';
+import { basename, dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 import type { DiscoveredTool, ToolMap, ToolSource } from '../types/tool.js';
@@ -11,8 +11,14 @@ import { detectCapabilities } from './capability.js';
 export function getBuiltInToolsPath(): string {
   // In development: <repo>/cli/tools/
   // In production: <node_modules>/@aikuora/cli/tools/
+  // Bundled:  import.meta.url → dist/index.js    → dirname = dist/     → 1 level up = CLI root
+  // Dev/test: import.meta.url → src/core/scanner.ts → dirname = src/core/ → 2 levels up = CLI root
   const currentFilePath = fileURLToPath(import.meta.url);
-  const cliRoot = resolve(dirname(currentFilePath), '../../');
+  const currentDir = dirname(currentFilePath);
+  const cliRoot =
+    basename(currentDir) === 'dist'
+      ? resolve(currentDir, '..')
+      : resolve(currentDir, '../..');
   return join(cliRoot, 'tools');
 }
 

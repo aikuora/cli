@@ -29,11 +29,11 @@
 
 There's no distinction between "devtool" and "scaffold template". **Everything is a tool** with capabilities the CLI auto-detects from the filesystem:
 
-| Has `configs/` | Has `templates/` | Capability                                                                  |
-| -------------- | ---------------- | --------------------------------------------------------------------------- |
-| ✅             | ❌               | **Linkable** — can be linked to targets (e.g. prettier, eslint)             |
-| ❌             | ✅               | **Scaffoldable** — can create new apps/packages/modules (e.g. nextjs, expo) |
-| ✅             | ✅               | **Hybrid** — both (e.g. tsconfig with base configs + per-target templates)  |
+| Has `template/` | Has `templates/` | Capability                                                                  |
+| --------------- | ---------------- | --------------------------------------------------------------------------- |
+| ✅              | ❌               | **Linkable** — can be linked to targets (e.g. prettier, eslint)             |
+| ❌              | ✅               | **Scaffoldable** — can create new apps/packages/modules (e.g. nextjs, expo) |
+| ✅              | ✅               | **Hybrid** — both (e.g. tsconfig with base configs + per-target templates)  |
 
 **No hardcoded registry**. The CLI scans tool directories and reads each tool's `aikuora.tool.yml` to understand what it offers and how to use it.
 
@@ -61,17 +61,19 @@ Three distinct YAML files, each with a clear scope:
 
 ## 4. Tool Anatomy
 
-Every tool is a folder with a `aikuora.tool.yml` and optional `configs/`, `templates/`, and `dependents/` directories.
+Every tool is a folder with a `aikuora.tool.yml` and optional `template/`, `templates/`, and `dependents/` directories.
 
 ### 4.1 Linkable Tool (e.g. prettier)
 
 ```
 tools/prettier/
 ├── aikuora.tool.yml         # Tool metadata + linking instructions
-├── configs/                    # Centralized config files
-│   ├── index.mjs               # export default { ... }
-│   └── package.json            # @<scope>/prettier-config
+└── template/                # Shareable config content
+    ├── index.mjs            # export default { ... }
+    └── package.json         # tool-level deps merged into packages/configs/package.json
 ```
+
+When `kind: shareable`, content goes to `packages/configs/src/prettier/` instead of a standalone package. Consumers import as `@<scope>/configs/prettier`.
 
 ```yaml
 # tools/prettier/aikuora.tool.yml
@@ -79,21 +81,47 @@ name: prettier
 lang: typescript
 runtime: node
 packageManager: pnpm
+kind: shareable              # contributes to packages/configs/src/prettier/
 
 prototools:
   node: '22.x'
   pnpm: '9.x'
 
-# Linking instructions (how to consume this config from a target)
+# Workspace-level integrations applied on aikuora add prettier
+workspace:
+  vscode:
+    extensions:
+      - esbenp.prettier-vscode
+    settings:
+      editor.defaultFormatter: "esbenp.prettier-vscode"
+      editor.formatOnSave: true
+  claude:
+    hooks:
+      PostFileWrite:
+        - matcher: "*.{js,jsx,ts,tsx,mjs,cjs,json,md,css,scss,yaml,yml}"
+          command: 'pnpm exec prettier --write "$FILE"'
+  moon:
+    file: typescript
+    inheritedBy:
+      toolchains:
+        or: [typescript]
+    tasks:
+      - name: format
+        command: prettier
+        args: ['--write', '.']
+        options:
+          cache: false
+      - name: format-check
+        command: prettier
+        args: ['--check', '.']
+
+# Linking instructions (how to consume this config from a target — kind: none tools)
 link:
   dependency: true # add as devDependency in target
   targetFile: 'prettier.config.mjs'
   content: |
-    import config from "@{{scope}}/prettier-config";
+    import config from "@{{scope}}/configs/prettier";
     export default config;
-  moonTask:
-    name: format
-    command: 'prettier --write .'
 ```
 
 ### 4.2 Scaffoldable Tool (e.g. nextjs)
@@ -149,12 +177,12 @@ scaffold:
 ```
 tools/tsconfig/
 ├── aikuora.tool.yml
-├── configs/                    # Multiple config variants
+├── template/                   # Multiple config variants (shareable content)
 │   ├── base.json
 │   ├── nextjs.json             # extends base
 │   ├── library.json            # extends base
 │   ├── expo.json               # extends base
-│   └── package.json            # @<scope>/tsconfig
+│   └── package.json            # tool-level deps merged into packages/configs/
 ├── templates/                  # Optional: per-variant target templates
 │   └── tsconfig.json.hbs
 ```
@@ -192,9 +220,9 @@ link:
       forTools: [ts-library, orpc]
     - name: expo
       forTools: [expo]
-  moonTask:
-    name: typecheck
-    command: 'tsc --noEmit'
+  moonTasks:
+    - name: typecheck
+      command: 'tsc --noEmit'
 ```
 
 ### 4.4 Tool with Dependents (e.g. shadcn — UI package tool)
@@ -265,7 +293,7 @@ export const integrate: IntegrationHandler = async ({ target, source, fs }) => {
 ```
 tools/ruff/
 ├── aikuora.tool.yml
-├── configs/
+├── template/
 │   ├── ruff.toml               # Centralized ruff config
 │   └── package.json            # metadata only (consistency)
 ```
@@ -286,9 +314,9 @@ link:
   targetFile: 'ruff.toml'
   content: |
     extend = "../../tools/ruff/ruff.toml"
-  moonTask:
-    name: lint
-    command: 'ruff check .'
+  moonTasks:
+    - name: lint
+      command: 'ruff check .'
 ```
 
 ### 4.5 Complete Built-in Tool List
@@ -331,6 +359,13 @@ cli/tools/                          # Shipped with the CLI package
 │       └── ...
 │
 ├── packages/                      # Reusable internal libraries
+│   ├── configs/                   # Consolidated TypeScript config package (created by CLI)
+│   │   ├── package.json           # name: "@scope/configs", exports: { "./*": "./src/*/index.mjs" }
+│   │   └── src/
+│   │       ├── prettier/
+│   │       │   └── index.mjs      # populated by aikuora add prettier
+│   │       └── eslint/
+│   │           └── index.mjs      # populated by aikuora add eslint
 │   ├── ui/                        # e.g.: scaffolded from tools/shadcn
 │   │   ├── aikuora.project.yml    # tool: shadcn, dependencies.tools: [tailwind]
 │   │   └── ...
@@ -346,36 +381,10 @@ cli/tools/                          # Shipped with the CLI package
 │       ├── aikuora.project.yml
 │       └── ...
 │
-└── tools/                         # Project-level tools (override or extend built-ins)
-    ├── prettier/
-    │   ├── aikuora.tool.yml
-    │   └── configs/
-    │       ├── index.mjs
-    │       └── package.json
-    ├── eslint/
-    │   ├── aikuora.tool.yml
-    │   └── configs/
-    │       ├── index.mjs
-    │       └── package.json
-    ├── tsconfig/
-    │   ├── aikuora.tool.yml
-    │   └── configs/
-    │       ├── base.json
-    │       ├── nextjs.json
-    │       ├── library.json
-    │       └── package.json
-    ├── ruff/
-    │   ├── aikuora.tool.yml
-    │   └── configs/
-    │       └── ruff.toml
-    ├── vite/
-    │   ├── aikuora.tool.yml
-    │   └── configs/
-    │       ├── index.mjs
-    │       └── package.json
-    └── tailwind/
+└── tools/                         # Project-level tool overrides (only via aikuora add <tool> --local)
+    └── prettier/                  # Example: forked built-in tool
         ├── aikuora.tool.yml
-        └── configs/
+        └── template/
             ├── index.mjs
             └── package.json
 ```
@@ -467,7 +476,7 @@ aikuora init --name my-project --scope @my-project
 
 **Deterministic actions:**
 
-1. Create directory structure (apps/, packages/, modules/, tools/)
+1. Create directory structure (apps/, packages/, modules/)
 2. Generate `aikuora.tool.yml` with provided values
 3. Generate `.prototools` with Node "lts" + pnpm "latest" (runtime-resolved aliases)
 4. Generate `.moon/workspace.yml` with project globs
@@ -712,7 +721,7 @@ cli/
 ├── tools/                          # Built-in tools (shipped with CLI)
 │   ├── prettier/
 │   │   ├── aikuora.tool.yml
-│   │   └── configs/
+│   │   └── template/
 │   ├── eslint/
 │   ├── tsconfig/
 │   ├── ruff/
@@ -757,8 +766,10 @@ cli/
 │       ├── output.ts               # Dual output (human/JSON)
 │       ├── template.ts             # Handlebars template rendering
 │       ├── prototools.ts           # Read/update .prototools
-│       ├── moon.ts                 # Build/write/update moon.yml
-│       └── integration-fs.ts       # IntegrationFs runtime implementation
+│       ├── moon.ts                 # Build/write/update moon.yml + addInheritedMoonTasks
+│       ├── integration-fs.ts       # IntegrationFs runtime implementation
+│       ├── integration.ts          # Integration utilities
+│       └── project-file.ts         # Read/write aikuora.project.yml
 │
 ├── dist/                           # Compiled output
 └── bin/
@@ -784,8 +795,8 @@ export class ToolScanner {
 // src/core/capability.ts
 export function detectCapabilities(toolDir: string): ToolCapabilities {
   return {
-    linkable: existsSync(join(toolDir, "configs")),
-    scaffoldable: existsSync(join(toolDir, "templates")),
+    linkable: existsSync(join(toolDir, "template")),   // singular
+    scaffoldable: existsSync(join(toolDir, "templates")), // plural
   };
 }
 ```
@@ -1045,9 +1056,13 @@ interface ToolConfig {
   lang: 'typescript' | 'python';
   runtime: 'node' | 'python';
   packageManager: 'pnpm' | 'uv';
+  kind?: 'shareable' | 'root' | 'none'; // default: 'none'
   prototools: Record<string, string>;
 
-  // Present if tool has configs/ (linkable)
+  // Workspace-level integrations applied on aikuora add <tool> (shareable mode)
+  workspace?: WorkspaceConfig;
+
+  // Present if tool has template/ (linkable)
   link?: {
     dependency: boolean;
     targetFile: string;
@@ -1057,15 +1072,48 @@ interface ToolConfig {
       default?: boolean;
       forTools?: string[]; // auto-select for these scaffold tools
     }[];
-    moonTask?: { name: string; command: string };
+    moonTasks?: MoonTask[]; // plural; supports args and options
   };
 
   // Present if tool has templates/ (scaffoldable)
   scaffold?: {
     type: 'app' | 'package' | 'module';
     devtools: string[];
-    moonTasks: { name: string; command: string }[];
+    moonTasks: MoonTask[];
   };
+}
+
+interface MoonTask {
+  name: string;
+  command: string;
+  args?: string[];
+  options?: MoonTaskOptions;
+}
+
+interface MoonTaskOptions {
+  cache?: boolean;
+}
+
+interface WorkspaceConfig {
+  vscode?: {
+    extensions?: string[];
+    settings?: Record<string, unknown>;
+  };
+  claude?: {
+    hooks?: Record<string, ClaudeHookEntry[]>;
+  };
+  moon?: MoonInheritance;
+}
+
+interface ClaudeHookEntry {
+  matcher: string;
+  command: string;
+}
+
+interface MoonInheritance {
+  file: string; // .moon/tasks/<file>.yml
+  inheritedBy?: Record<string, unknown>;
+  tasks: MoonTask[];
 }
 ```
 
@@ -1073,7 +1121,7 @@ interface ToolConfig {
 
 ## 13. Implementation Roadmap
 
-### Phase 1: CLI Core + Scanner
+### Phase 1: CLI Core + Scanner ✅
 
 1. Project setup: package.json, tsconfig, tsup
 2. Config manager: read/write root `aikuora.tool.yml`
@@ -1094,13 +1142,27 @@ interface ToolConfig {
 7. Moon.yml utility
 8. `IntegrationFs` runtime + `IntegrationHandler` contract
 9. Three-file config system (`aikuora.workspace.yml`, `aikuora.tool.yml`, `aikuora.project.yml`)
+10. `aikuora.project.yml` write after scaffold and link
+11. Integration handler resolution and invocation
 
-### Phase 3: Built-in Tools
+### Phase 3: Built-in Tools 🔄 In Progress
 
-1. Linkable tools: prettier, eslint, tsconfig, ruff, vite, tailwind
-2. Scaffoldable tools: nextjs, ts-library
-3. Scaffoldable tools: expo, python-library, orpc, langchain
-4. `sync`, `info`, `list` commands
+**Architectural decisions completed**:
+- `kind: shareable | root | none` field in tool schema
+- Consolidated `packages/configs/` package (wildcard exports `"./*": "./src/*/index.mjs"`)
+- Renamed `configs/` → `template/` for tool content; capability detection updated
+- `workspace` config block (vscode, claude, moon) with idempotent merge behavior
+- Moon task inheritance system (`workspace.moon` → `.moon/tasks/<file>.yml`)
+- `moonTasks` plural in `linkConfig` with `args` and `options` support
+- `runShareable` mode in `add` command + `applyWorkspaceSettings()`
+- Fixed `getBuiltInToolsPath()` context-aware path resolution
+- Removed `tools/` directory creation from `init`
+
+**Built-in tools**:
+- ✅ prettier (shareable, with vscode + claude + moon workspace config)
+- Remaining linkable tools: eslint, tsconfig, ruff, vite, tailwind
+- Scaffoldable tools: nextjs, ts-library, expo, python-library, orpc, langchain
+- `sync`, `info`, `list` commands
 
 ### Phase 4: Claude Code Plugin
 
@@ -1111,5 +1173,5 @@ interface ToolConfig {
 
 ### Phase 5: Publish
 
-22. Publish CLI to npm as `@aikuora/cli`
-23. Publish plugin to Claude Code marketplace
+1. Publish CLI to npm as `@aikuora/cli`
+2. Publish plugin to Claude Code marketplace

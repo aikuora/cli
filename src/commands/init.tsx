@@ -1,4 +1,3 @@
-import { mkdir } from 'fs/promises';
 import { resolve } from 'path';
 
 import { Text } from 'ink';
@@ -20,9 +19,6 @@ export async function initCommand(options: InitOptions) {
   try {
     // Copy init template with Handlebars variables
     await copyTemplate('init', projectRoot, { name, scope });
-
-    // Create tools directory (internal to aikuora, not a workspace dir)
-    await mkdir(resolve(projectRoot, 'tools'), { recursive: true });
 
     const result = {
       action: 'init',

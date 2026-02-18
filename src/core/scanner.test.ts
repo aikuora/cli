@@ -4,16 +4,16 @@ import { groupToolsByCapability, scanAllTools } from './scanner.js';
 
 describe('Tool Scanner', () => {
   describe('scanAllTools', () => {
-    it('should return an empty map if no tools exist', () => {
+    it('should always return built-in tools regardless of project path', () => {
       const tools = scanAllTools('/nonexistent/path');
-      expect(tools).toEqual({});
+      expect(tools['prettier']).toBeDefined();
+      expect(tools['prettier']?.source).toBe('built-in');
     });
 
-    it('should scan built-in tools from current directory', () => {
-      // In this test environment, there are no built-in tools yet
-      // This test will pass once we add built-in tools to the tools/ directory
+    it('should include built-in tools when scanning from project root', () => {
       const tools = scanAllTools(process.cwd());
       expect(tools).toBeDefined();
+      expect(tools['prettier']).toBeDefined();
     });
   });
 

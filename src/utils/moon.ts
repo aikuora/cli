@@ -15,10 +15,15 @@ type MoonTaskEntry = {
   options?: Record<string, unknown>;
 };
 
+const MOON_PROJECT_SCHEMA = 'https://moonrepo.dev/schemas/v2/project.json';
+const MOON_TASKS_SCHEMA = 'https://moonrepo.dev/schemas/v2/tasks.json';
+
 /**
- * Build a moon.yml data structure from a list of tasks.
+ * Build a project moon.yml data structure from a list of tasks.
+ * Includes `$schema` and optional `language` for Moon's automatic task inheritance
+ * (projects with `language: typescript` inherit `.moon/tasks/typescript.yml`).
  */
-export function buildMoonConfig(tasks: MoonTask[]): object {
+export function buildMoonConfig(tasks: MoonTask[], language?: string): object {
   const taskEntries: Record<string, MoonTaskEntry> = {};
 
   for (const task of tasks) {
@@ -29,15 +34,19 @@ export function buildMoonConfig(tasks: MoonTask[]): object {
     taskEntries[task.name] = entry;
   }
 
-  return { tasks: taskEntries };
+  const config: Record<string, unknown> = { '$schema': MOON_PROJECT_SCHEMA };
+  if (language) config.language = language;
+  config.tasks = taskEntries;
+
+  return config;
 }
 
 /**
- * Write a moon.yml file at the given path.
+ * Write a moon.yml file at the given path, with blank lines between tasks.
  */
 export async function writeMoonYml(filePath: string, config: object): Promise<void> {
-  const content = stringify(config, { lineWidth: 100, indent: 2 });
-  await writeFile(filePath, content, 'utf-8');
+  const content = stringify(config, { lineWidth: 100, indent: 2, defaultStringType: 'QUOTE_DOUBLE' });
+  await writeFile(filePath, formatTasksYaml(content), 'utf-8');
 }
 
 /**
@@ -71,8 +80,6 @@ export async function addMoonTask(filePath: string, task: MoonTask): Promise<voi
   await writeMoonYml(filePath, config);
 }
 
-const MOON_TASKS_SCHEMA = 'https://moonrepo.dev/schemas/v2/tasks.json';
-
 /**
  * Insert a blank line before each task entry (except the first) for readability.
  * Input YAML must already be valid — this is a pure text post-processing step.
@@ -96,7 +103,7 @@ function formatTasksYaml(content: string): string {
       inTasksBlock = false;
     }
 
-    if (inTasksBlock && /^  [a-zA-Z0-9_-]+:/.test(line)) {
+    if (inTasksBlock && /^ {2}[a-zA-Z0-9_-]+:/.test(line)) {
       if (!isFirstTask) result.push('');
       isFirstTask = false;
     }
@@ -108,12 +115,14 @@ function formatTasksYaml(content: string): string {
 }
 
 /**
- * Write tasks to `.moon/tasks/<inheritance.file>.yml` at the workspace root.
- * - Creates the file with `$schema` and `inheritedBy` if it does not exist.
- * - Preserves existing `inheritedBy` if the file already exists.
- * - Ensures `$schema` is always present (adds it to existing files if missing).
- * - Skips tasks that already exist in the file.
+ * Write tasks to `.moon/tasks/<config.file>.yml` at the workspace root.
+ * - Creates the file with `$schema` if it does not exist.
+ * - Ensures `$schema` is always present.
+ * - Skips tasks that already exist in the file (idempotent).
  * - Adds blank lines between task entries for readability.
+ *
+ * Moon automatically inherits tasks from `.moon/tasks/<language>.yml`
+ * for projects that declare the matching `language` in their `moon.yml`.
  */
 export async function addInheritedMoonTasks(
   workspaceRoot: string,
@@ -126,7 +135,6 @@ export async function addInheritedMoonTasks(
 
   type MoonTasksFile = {
     '$schema'?: string;
-    inheritedBy?: Record<string, unknown>;
     tasks?: Record<string, MoonTaskEntry>;
   };
 
@@ -136,10 +144,6 @@ export async function addInheritedMoonTasks(
     const raw = readFileSync(filePath, 'utf-8');
     existing = (parse(raw) as MoonTasksFile) ?? {};
   }
-
-  // inheritedBy: preserve from existing file; set from config only when creating
-  const inheritedBy =
-    existing.inheritedBy ?? (inheritance.inheritedBy as Record<string, unknown> | undefined);
 
   // Merge tasks — skip any that already exist (idempotent)
   const tasks: Record<string, MoonTaskEntry> = existing.tasks ?? {};
@@ -153,13 +157,12 @@ export async function addInheritedMoonTasks(
     tasks[task.name] = entry;
   }
 
-  // Rebuild with stable key order: $schema → inheritedBy → tasks
+  // Stable key order: $schema → tasks
   const finalConfig: MoonTasksFile = {
     '$schema': MOON_TASKS_SCHEMA,
-    ...(inheritedBy ? { inheritedBy } : {}),
     tasks,
   };
 
-  const raw = stringify(finalConfig, { lineWidth: 100, indent: 2 });
+  const raw = stringify(finalConfig, { lineWidth: 100, indent: 2, defaultStringType: 'QUOTE_DOUBLE' });
   await writeFile(filePath, formatTasksYaml(raw), 'utf-8');
 }

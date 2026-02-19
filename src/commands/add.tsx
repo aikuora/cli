@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
 import { mkdir, writeFile } from 'fs/promises';
 import { join, resolve } from 'path';
 
@@ -15,9 +15,9 @@ import { addInheritedMoonTasks, addMoonTask, buildMoonConfig, writeMoonYml } fro
 import type { OutputOptions } from '../utils/output.js';
 import { output, outputError, outputSuccess } from '../utils/output.js';
 import { invokeIntegrationHandler } from '../utils/integration.js';
-import { updatePrototools } from '../utils/prototools.js';
+import { pinProtoVersion, updatePrototools } from '../utils/prototools.js';
 import { appendProjectDependency, appendToolDependency, readProjectFile, writeProjectFile } from '../utils/project-file.js';
-import { copyTemplate, renderAndCopy } from '../utils/template.js';
+import { renderAndCopy } from '../utils/template.js';
 
 export interface AddOptions extends OutputOptions {
   toolName: string;
@@ -86,7 +86,13 @@ async function runRoot(options: AddOptions): Promise<{ success: boolean }> {
     return { success: false };
   }
 
-  // Render template/ files to project root (idempotent — overwrites with deterministic content)
+  // Ensure required root tools are set up first (e.g. pnpm requires node)
+  if (toolConfig.requires && toolConfig.requires.length > 0) {
+    await ensureRequiredTools(toolConfig.requires, options);
+  }
+
+  // Render template/ files to project root.
+  // skipExisting: true — never overwrite user-modified files (package.json, etc.) on re-runs.
   const templateDir = join(discovered.path, 'template');
   if (existsSync(templateDir)) {
     const context = {
@@ -94,14 +100,16 @@ async function runRoot(options: AddOptions): Promise<{ success: boolean }> {
       defaults: rootConfig.defaults,
       project: rootConfig.project,
     };
-    await renderAndCopy(templateDir, projectRoot, context as Record<string, unknown>);
+    await renderAndCopy(templateDir, projectRoot, context as Record<string, unknown>, {
+      skipExisting: true,
+    });
   }
 
-  // Pin version in .prototools (idempotent — skips existing keys)
+  // Pin version in .prototools using proto pin --resolve so the real version is stored
   if (toolConfig.installer === 'proto') {
     const defaults = rootConfig.defaults as Record<string, string>;
     const version = defaults[toolName] ?? toolConfig.version ?? 'latest';
-    await updatePrototools(join(projectRoot, '.prototools'), { [toolName]: version });
+    await pinProtoVersion(projectRoot, toolName, version);
   }
 
   // Apply workspace settings (vscode, claude hooks, moon tasks)
@@ -203,9 +211,12 @@ async function runScaffold(options: AddOptions) {
     year: new Date().getFullYear(),
   };
 
-  await copyTemplate(`${toolName}/templates`, targetDir, templateContext);
+  const templateDir = join(discovered.path, 'templates');
+  if (existsSync(templateDir)) {
+    await renderAndCopy(templateDir, targetDir, templateContext);
+  }
 
-  const moonConfig = buildMoonConfig(scaffold.moonTasks);
+  const moonConfig = buildMoonConfig(scaffold.moonTasks, toolConfig.lang ?? undefined);
   await writeMoonYml(join(targetDir, 'moon.yml'), moonConfig);
 
   if (Object.keys(toolConfig.prototools).length > 0) {
@@ -214,16 +225,19 @@ async function runScaffold(options: AddOptions) {
 
   // Auto-link devtools
   const linkedTools: string[] = [];
-  for (const devTool of scaffold.devtools) {
+  for (const devToolEntry of scaffold.devtools) {
+    const devToolName = typeof devToolEntry === 'string' ? devToolEntry : devToolEntry.tool;
+    const devToolVariant = typeof devToolEntry === 'string' ? undefined : devToolEntry.variant;
     const linkResult = await runLink({
       ...options,
-      toolName: devTool,
+      toolName: devToolName,
+      variant: devToolVariant,
       target: join(typeDir, appName!),
       name: undefined,
       local: false,
     });
     if (linkResult.success) {
-      linkedTools.push(devTool);
+      linkedTools.push(devToolName);
     }
   }
 
@@ -252,6 +266,75 @@ async function runScaffold(options: AddOptions) {
   else outputSuccess(`Scaffolded ${toolName} app '${appName}' at ${join(typeDir, appName!)}`, { json });
 
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// package.json helpers
+// ---------------------------------------------------------------------------
+
+function sortDeps(deps: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(deps).sort(([a], [b]) => a.localeCompare(b)));
+}
+
+// Determine the correct package.json export patterns for a shareable tool.
+// Node.js exports only allow ONE * per pattern, so we use per-tool paths:
+//   prettier  (index.mjs only) → "./prettier"         → ./src/prettier/index.mjs
+//   eslint    (.mjs variants)  → "./eslint/*"         → ./src/eslint/*.mjs
+//   tsconfig  (.json files)    → "./tsconfig/*.json"  → ./src/tsconfig/*.json
+function buildToolExportPatterns(toolName: string, templateDir: string): Record<string, string> {
+  if (!existsSync(templateDir)) return {};
+
+  const files = readdirSync(templateDir).filter(
+    (f) => f !== 'package.json' && !statSync(join(templateDir, f)).isDirectory()
+  );
+
+  const mjsFiles = files.filter((f) => f.endsWith('.mjs'));
+  const jsonFiles = files.filter((f) => f.endsWith('.json'));
+
+  const patterns: Record<string, string> = {};
+
+  if (mjsFiles.length === 1 && mjsFiles[0] === 'index.mjs') {
+    // Single entry point: @scope/configs/prettier
+    patterns[`./${toolName}`] = `./src/${toolName}/index.mjs`;
+  } else if (mjsFiles.length > 0) {
+    // Multiple variants: @scope/configs/eslint/typescript
+    patterns[`./${toolName}/*`] = `./src/${toolName}/*.mjs`;
+  }
+
+  if (jsonFiles.length > 0) {
+    // JSON configs: @scope/configs/tsconfig/base.json
+    patterns[`./${toolName}/*.json`] = `./src/${toolName}/*.json`;
+  }
+
+  return patterns;
+}
+
+/**
+ * Add peerDependencies from a package to the root workspace package.json devDependencies.
+ * Skips keys that are already present. No-ops if root package.json doesn't exist.
+ */
+async function ensureRootPeerDeps(
+  projectRoot: string,
+  peerDeps: Record<string, string>
+): Promise<void> {
+  const rootPkgPath = join(projectRoot, 'package.json');
+  if (!existsSync(rootPkgPath)) return;
+
+  const rootPkg = JSON.parse(readFileSync(rootPkgPath, 'utf-8')) as Record<string, unknown>;
+  const devDeps = (rootPkg.devDependencies as Record<string, string>) ?? {};
+
+  let changed = false;
+  for (const [dep, version] of Object.entries(peerDeps)) {
+    if (!(dep in devDeps)) {
+      devDeps[dep] = version;
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    rootPkg.devDependencies = sortDeps(devDeps);
+    await writeFile(rootPkgPath, JSON.stringify(rootPkg, null, 2) + '\n', 'utf-8');
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -342,7 +425,10 @@ async function applyWorkspaceSettings(
 interface SharedPackageResult {
   created: boolean;
   path: string;
+  /** Full import path used in config files, e.g. scope/configs/prettier */
   packageName: string;
+  /** Package name for devDependencies, e.g. scope/configs */
+  configsName: string;
 }
 
 async function ensureConfigsEntry(
@@ -375,39 +461,38 @@ async function ensureConfigsEntry(
     pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8')) as Record<string, unknown>;
   }
 
-  // Always ensure all managed export patterns are present and in the correct order.
-  // More-specific patterns must come before less-specific ones — Node.js resolves
-  // the first matching pattern, so "./*/*.json" must precede "./*/*" to prevent
-  // the generic pattern from capturing JSON paths like `tsconfig/base.json`.
-  //
-  //  "./*"        single-segment:  @scope/configs/prettier          → ./src/prettier/index.mjs
-  //  "./*/*.json" JSON variants:   @scope/configs/tsconfig/base.json → ./src/tsconfig/base.json
-  //  "./*/*"      JS variants:     @scope/configs/eslint/typescript  → ./src/eslint/typescript.mjs
-  const { './*': _a, './*/*.json': _b, './*/*': _c, ...customExports } = (
-    pkgJson.exports as Record<string, string>
-  ) ?? {};
-  pkgJson.exports = {
-    './*': './src/*/index.mjs',
-    './*/*.json': './src/*/*.json',
-    './*/*': './src/*/*.mjs',
-    ...customExports,
-  };
+  // Build per-tool export patterns (one * per pattern — Node.js requirement).
+  const currentExports = (pkgJson.exports as Record<string, string>) ?? {};
+  const toolPatterns = buildToolExportPatterns(toolName, join(toolPath, 'template'));
+  for (const [pattern, target] of Object.entries(toolPatterns)) {
+    if (!(pattern in currentExports)) currentExports[pattern] = target;
+  }
+  pkgJson.exports = currentExports;
 
   // Merge dependencies from tool's template/package.json (new keys only)
   const toolPkgJsonPath = join(toolPath, 'template', 'package.json');
+  let peerDepsToPropagate: Record<string, string> = {};
   if (existsSync(toolPkgJsonPath)) {
     const toolPkg = JSON.parse(readFileSync(toolPkgJsonPath, 'utf-8')) as Record<string, unknown>;
     for (const field of ['dependencies', 'devDependencies', 'peerDependencies'] as const) {
       if (toolPkg[field] && typeof toolPkg[field] === 'object') {
-        const existing = (pkgJson[field] as Record<string, string>) ?? {};
+        const merged = (pkgJson[field] as Record<string, string>) ?? {};
         for (const [dep, version] of Object.entries(toolPkg[field] as Record<string, string>)) {
-          if (!(dep in existing)) existing[dep] = version;
+          if (!(dep in merged)) merged[dep] = version;
         }
-        pkgJson[field] = existing;
+        pkgJson[field] = sortDeps(merged);
       }
+    }
+    if (toolPkg.peerDependencies && typeof toolPkg.peerDependencies === 'object') {
+      peerDepsToPropagate = toolPkg.peerDependencies as Record<string, string>;
     }
   }
   await writeFile(pkgJsonPath, JSON.stringify(pkgJson, null, 2) + '\n', 'utf-8');
+
+  // Propagate peerDependencies to the root workspace package.json
+  if (Object.keys(peerDepsToPropagate).length > 0) {
+    await ensureRootPeerDeps(projectRoot, peerDepsToPropagate);
+  }
 
   // ── Step 2: Copy tool template/ files (excluding package.json) to src/<name>/ ──
   const created = !existsSync(destToolDir);
@@ -430,7 +515,7 @@ async function ensureConfigsEntry(
     });
   }
 
-  return { created, path: destToolDir, packageName };
+  return { created, path: destToolDir, packageName, configsName: configsPkgName };
 }
 
 // ---------------------------------------------------------------------------
@@ -566,18 +651,20 @@ async function runLink(options: AddOptions) {
 
   // Resolve variant: --variant flag → default → first
   let resolvedVariant: string | null = null;
+  let resolvedVariantObj: (typeof variants)[0] | undefined;
   if (variantFlag) {
-    const found = variants.find((v) => v.name === variantFlag);
-    resolvedVariant = found?.name ?? variantFlag;
+    resolvedVariantObj = variants.find((v) => v.name === variantFlag);
+    resolvedVariant = resolvedVariantObj?.name ?? variantFlag;
   } else {
-    const defaultVariant = variants.find((v) => v.default);
-    resolvedVariant = defaultVariant?.name ?? (variants[0]?.name ?? null);
+    resolvedVariantObj = variants.find((v) => v.default) ?? variants[0];
+    resolvedVariant = resolvedVariantObj?.name ?? null;
   }
 
   const scope = rootConfig.project.scope;
 
   // For shareable tools, ensure the shared package exists before linking
   let packageName: string | undefined;
+  let configsName: string | undefined;
   if (toolConfig.kind === 'shareable') {
     const shared = await ensureConfigsEntry(
       toolName,
@@ -587,22 +674,44 @@ async function runLink(options: AddOptions) {
       scope
     );
     packageName = shared.packageName;
+    configsName = shared.configsName;
   }
 
-  const templateSource = Handlebars.compile(linkConfig.content);
+  // Use variant's content override if provided, otherwise use link.content
+  const contentTemplate = resolvedVariantObj?.content ?? linkConfig.content;
+  const templateSource = Handlebars.compile(contentTemplate);
   const rendered = templateSource({ scope, variant: resolvedVariant, packageName });
 
   const targetPath = resolve(projectRoot, target!);
   await mkdir(targetPath, { recursive: true });
   await writeFile(join(targetPath, linkConfig.targetFile), rendered, 'utf-8');
 
+  // Add the base configs package (e.g. "@scope/configs") to the target's devDependencies.
+  // All shareable tools live inside this single package — one entry covers them all.
+  if (configsName) {
+    const targetPkgPath = join(targetPath, 'package.json');
+    if (existsSync(targetPkgPath)) {
+      const targetPkg = JSON.parse(readFileSync(targetPkgPath, 'utf-8')) as Record<string, unknown>;
+      const devDeps = (targetPkg.devDependencies as Record<string, string>) ?? {};
+      if (!(configsName in devDeps)) {
+        devDeps[configsName] = 'workspace:*';
+        targetPkg.devDependencies = sortDeps(devDeps);
+        await writeFile(targetPkgPath, JSON.stringify(targetPkg, null, 2) + '\n', 'utf-8');
+      }
+    }
+  }
+
+  // Apply all workspace integrations: vscode settings/extensions, claude hooks, moon tasks
   const moonTasksAdded: string[] = [];
-  if (toolConfig.workspace?.moon) {
-    // Tasks are workspace-inherited — write to .moon/tasks/<file>.yml
-    await addInheritedMoonTasks(projectRoot, toolConfig.workspace.moon);
-    moonTasksAdded.push(...toolConfig.workspace.moon.tasks.map((t) => t.name));
-  } else {
-    // Per-project tasks — write to target moon.yml
+  if (toolConfig.workspace) {
+    await applyWorkspaceSettings(projectRoot, toolConfig.workspace);
+    if (toolConfig.workspace.moon) {
+      moonTasksAdded.push(...toolConfig.workspace.moon.tasks.map((t) => t.name));
+    }
+  }
+
+  // Per-project moon tasks from linkConfig (only when tool has no workspace-level moon config)
+  if (!toolConfig.workspace?.moon) {
     for (const task of linkConfig.moonTasks ?? []) {
       await addMoonTask(join(targetPath, 'moon.yml'), task);
       moonTasksAdded.push(task.name);

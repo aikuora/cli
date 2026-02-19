@@ -21,6 +21,8 @@ export const linkVariantSchema = z.object({
   name: z.string(),
   default: z.boolean().optional(),
   forTools: z.array(z.string()).optional(),
+  /** Optional content override for this variant. Replaces link.content when selected. */
+  content: z.string().optional(),
 });
 
 export const linkConfigSchema = z.object({
@@ -31,9 +33,14 @@ export const linkConfigSchema = z.object({
   moonTasks: z.array(moonTaskSchema).optional(),
 });
 
+export const devtoolEntrySchema = z.union([
+  z.string(),
+  z.object({ tool: z.string(), variant: z.string() }),
+]);
+
 export const scaffoldConfigSchema = z.object({
   type: z.enum(['app', 'package', 'module']),
-  devtools: z.array(z.string()),
+  devtools: z.array(devtoolEntrySchema),
   moonTasks: z.array(moonTaskSchema),
 });
 
@@ -65,18 +72,13 @@ export const workspaceConfigSchema = z.object({
     .optional(),
   /**
    * Moon task inheritance config.
-   * Tasks are written to `.moon/tasks/<file>.yml` and inherited by matching projects.
-   * `inheritedBy` is only written when creating the file; existing value is preserved.
+   * Tasks are written to `.moon/tasks/<file>.yml`.
+   * Moon automatically inherits tasks from `.moon/tasks/<language>.yml` for matching projects.
    */
   moon: z
     .object({
       /** Target filename without extension, e.g. "typescript" → `.moon/tasks/typescript.yml` */
       file: z.string(),
-      /**
-       * Conditions that must be met for projects to inherit these tasks.
-       * Maps directly to Moon's `inheritedBy` field (toolchains, stacks, layers, tags…).
-       */
-      inheritedBy: z.record(z.unknown()).optional(),
       tasks: z.array(moonTaskSchema),
     })
     .optional(),
@@ -109,7 +111,6 @@ export const toolConfigSchema = z.object({
   customizable: z.boolean().default(false),
   lang: z.enum(['typescript', 'python']).optional(),
   runtime: z.enum(['node', 'python']).optional(),
-  packageManager: z.enum(['pnpm', 'uv']).optional(),
   prototools: z.record(z.string()).default({}),
   /**
    * Maps scaffold tool names to integration handler file paths (relative to dependents/).
@@ -133,6 +134,7 @@ export type MoonTaskOptions = z.infer<typeof moonTaskOptionsSchema>;
 export type MoonTask = z.infer<typeof moonTaskSchema>;
 export type LinkVariant = z.infer<typeof linkVariantSchema>;
 export type LinkConfig = z.infer<typeof linkConfigSchema>;
+export type DevtoolEntry = z.infer<typeof devtoolEntrySchema>;
 export type ScaffoldConfig = z.infer<typeof scaffoldConfigSchema>;
 export type ClaudeHookEntry = z.infer<typeof claudeHookEntrySchema>;
 export type WorkspaceConfig = z.infer<typeof workspaceConfigSchema>;

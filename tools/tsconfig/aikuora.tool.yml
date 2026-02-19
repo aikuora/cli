@@ -1,7 +1,6 @@
 name: tsconfig
 kind: shareable
 lang: typescript
-packageManager: pnpm
 requires:
   - pnpm
 
@@ -16,9 +15,6 @@ workspace:
       typescript.updateImportsOnFileMove.enabled: "always"
   moon:
     file: typescript
-    inheritedBy:
-      toolchains:
-        or: [typescript]
     tasks:
       - name: typecheck
         command: tsc
@@ -28,10 +24,32 @@ workspace:
           - 'tsconfig.json'
 
 link:
-  dependency: false
+  dependency: true
   targetFile: tsconfig.json
   content: |
     {
       "$schema": "https://json.schemastore.org/tsconfig",
       "extends": "{{packageName}}/lib.json"
     }
+  variants:
+    - name: typescript
+      default: true
+    - name: nextjs
+      forTools:
+        - nextjs
+      content: |
+        {
+          "$schema": "https://json.schemastore.org/tsconfig",
+          "extends": "{{packageName}}/base.json",
+          "compilerOptions": {
+            "lib": ["dom", "dom.iterable", "esnext"],
+            "allowJs": true,
+            "skipLibCheck": true,
+            "noEmit": true,
+            "moduleResolution": "bundler",
+            "jsx": "preserve",
+            "incremental": true
+          },
+          "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+          "exclude": ["node_modules"]
+        }

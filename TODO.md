@@ -49,20 +49,35 @@ See [PLAN.md](./PLAN.md) for detailed specifications.
 - [x] `applyWorkspaceSettings` (merges vscode settings, extensions, claude hooks, moon tasks)
 - [x] Fixed `getBuiltInToolsPath()` context-aware resolution
 - [x] Removed `tools/` dir creation from `init`
-- [x] Implement prettier tool
-- [ ] Create built-in tool templates in `tools/` directory (using `aikuora.tool.yml`)
-- [x] Implement pnpm tool (pnpm-workspace.yaml + .moon/toolchain.yml)
-- [x] Add `requires` field to tool schema (auto-setup dependencies)
-- [x] Implement eslint tool
-- [x] Implement tsconfig tool
-- [ ] Implement nextjs tool — scaffold in `apps/`, devtools: prettier + eslint + tsconfig
-- [ ] Implement vitest tool — shareable config in `packages/configs/src/vitest/`, moon tasks: test + test-watch
-- [ ] Implement tsup tool — shareable config in `packages/configs/src/tsup/`, moon tasks: build
-- [ ] Implement tailwind tool — shareable config in `packages/configs/src/tailwind/`, PostCSS integration
-- [ ] Implement shadcn tool — links shadcn/ui config to a Next.js app (variant: nextjs)
-- [ ] Implement commitlint tool — kind: root, shareable config, git hook via lefthook
-- [ ] Implement lefthook tool — kind: root, installs lefthook.yml at workspace root
-- [ ] Implement release-please tool — kind: root, release-please-config.json + .release-please-manifest.json
+- [x] Implement prettier tool (shareable, workspace: vscode + claude + moon)
+- [x] Implement pnpm tool (kind: root, pnpm-workspace.yaml, requires: node)
+- [x] Implement node tool (kind: root, package.json + .moon/toolchains.yml, requires: moon)
+- [x] Implement moon tool (kind: root, pinned to .prototools via proto pin --resolve)
+- [x] Add `requires` field to tool schema (auto-setup dependency chain: pnpm → node → moon)
+- [x] Implement eslint tool (shareable, nextjs variant)
+- [x] Implement tsconfig tool (shareable, typescript + nextjs variants with per-variant content)
+- [x] Implement nextjs tool (scaffoldable → apps/, devtools: prettier + eslint/nextjs + tsconfig/nextjs)
+- [x] Remove `packageManager` field from schema and all tool YAMLs
+- [x] Add `installer` / `version` / `requires` fields to tool schema for root tools
+- [x] Add `devtoolEntrySchema` — scaffold devtools support `{tool, variant}` objects
+- [x] Add per-variant `content` field to `linkVariantSchema` (overrides `link.content`)
+- [x] Fix scanner to include root tools (tools with `aikuora.tool.yml` but no `template/`)
+- [x] Use `proto pin --resolve` to store real versions in `.prototools` (not aliases)
+- [x] Fix `.prototools` blank line accumulation on repeated insertions
+- [x] Fix Moon v2: `vcs.manager`, `toolchains.yml` with `javascript` section, double quotes
+- [x] Fix `runLink` to call `applyWorkspaceSettings` (was only handling moon tasks)
+- [x] Fix exports: per-tool patterns (one `*` per pattern — Node.js requirement)
+- [x] Sort all `package.json` dependencies alphabetically
+- [x] Propagate `peerDependencies` to root `package.json` devDependencies
+- [x] Add `skipExisting` option to `renderAndCopy` (root tools don't overwrite user files)
+- [x] Add `language` field to project `moon.yml` for Moon task inheritance (replaces `inheritedBy`)
+- [ ] Implement vitest tool — shareable, moon tasks: test + test-watch
+- [ ] Implement tsup tool — shareable, moon task: build
+- [ ] Implement tailwind tool — shareable, PostCSS integration
+- [ ] Implement shadcn tool — scaffoldable package + nextjs integration handler
+- [ ] Implement commitlint tool — kind: root, git hook via lefthook
+- [ ] Implement lefthook tool — kind: root, lefthook.yml at workspace root
+- [ ] Implement release-please tool — kind: root
 - [ ] Implement `sync`, `info`, `list` commands
 
 #### Phase 4 - Claude Code Plugin

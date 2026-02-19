@@ -1,0 +1,13 @@
+$schema: "https://moonrepo.dev/schemas/v2/toolchains.json"
+
+node:
+  version: "{{defaults.node}}"
+
+pnpm:
+  version: "{{defaults.pnpm}}"
+
+javascript:
+  dedupeOnLockfileChange: true
+  inferTasksFromScripts: false
+  packageManager: pnpm
+  syncProjectWorkspaceDependencies: true

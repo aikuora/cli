@@ -43,7 +43,7 @@ describe('Tool Config Loader', () => {
       expect(result.success).toBe(true);
     });
 
-    it('should validate scaffold config', () => {
+    it('should validate scaffold config with string devtools', () => {
       const config = {
         name: 'nextjs',
         scaffold: {
@@ -60,13 +60,31 @@ describe('Tool Config Loader', () => {
       expect(result.success).toBe(true);
     });
 
+    it('should validate scaffold config with object devtools (tool + variant)', () => {
+      const config = {
+        name: 'nextjs',
+        scaffold: {
+          type: 'app',
+          devtools: [
+            'prettier',
+            { tool: 'eslint', variant: 'nextjs' },
+            { tool: 'tsconfig', variant: 'nextjs' },
+          ],
+          moonTasks: [{ name: 'dev', command: 'next dev' }],
+        },
+      };
+
+      const result = toolConfigSchema.safeParse(config);
+      expect(result.success).toBe(true);
+    });
+
     it('should validate full config with all fields', () => {
       const config = {
         name: 'nextjs',
         customizable: true,
         lang: 'typescript',
         runtime: 'node',
-        packageManager: 'pnpm',
+
         prototools: { node: '20.0.0', pnpm: '9.0.0' },
         scaffold: {
           type: 'app',

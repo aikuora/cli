@@ -50,9 +50,10 @@ export function scanToolDirectory(directoryPath: string, source: ToolSource): To
       }
 
       const capabilities = detectCapabilities(toolPath);
+      const hasConfig = existsSync(join(toolPath, 'aikuora.tool.yml'));
 
-      // Only include tools that have at least one capability
-      if (capabilities.linkable || capabilities.scaffoldable) {
+      // Include tools with any capability OR with an aikuora.tool.yml (e.g. root tools)
+      if (capabilities.linkable || capabilities.scaffoldable || hasConfig) {
         tools[entry] = {
           name: entry,
           path: toolPath,

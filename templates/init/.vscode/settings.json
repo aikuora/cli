@@ -5,5 +5,8 @@
     "https://moonrepo.dev/schemas/v2/toolchains.json": ".moon/toolchains.yml",
     "https://moonrepo.dev/schemas/v2/workspace.json": ".moon/workspace.yml",
     "https://moonrepo.dev/schemas/v2/template.json": "templates/**/template.yml"
+  },
+  "[yaml]": {
+    "editor.defaultFormatter": "redhat.vscode-yaml"
   }
 }

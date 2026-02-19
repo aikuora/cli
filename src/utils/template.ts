@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readdir, readFile, stat, writeFile } from 'fs/promises';
+import { access, copyFile, mkdir, readdir, readFile, stat, writeFile } from 'fs/promises';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -15,15 +15,18 @@ export function getTemplatesPath(): string {
 
 /**
  * Render and copy an arbitrary source directory to a destination.
- * Works identically to copyTemplate but accepts an absolute source path
- * (useful for tool template/ directories outside of templates/).
+ * Accepts an absolute source path (useful for tool template/ directories outside of templates/).
+ *
+ * @param skipExisting - When true, skips files that already exist at the destination.
+ *   Use this for root tool templates to avoid overwriting user-modified files on re-runs.
  */
 export async function renderAndCopy(
   sourceDir: string,
   destination: string,
-  variables: Record<string, unknown> = {}
+  variables: Record<string, unknown> = {},
+  options: { skipExisting?: boolean } = {}
 ): Promise<void> {
-  await copyDirectory(sourceDir, destination, variables);
+  await copyDirectory(sourceDir, destination, variables, options.skipExisting ?? false);
 }
 
 /**
@@ -37,7 +40,7 @@ export async function copyTemplate(
   const templatesPath = getTemplatesPath();
   const templatePath = join(templatesPath, templateName);
 
-  await copyDirectory(templatePath, destination, variables);
+  await copyDirectory(templatePath, destination, variables, false);
 }
 
 /**
@@ -46,7 +49,8 @@ export async function copyTemplate(
 async function copyDirectory(
   source: string,
   destination: string,
-  variables: Record<string, unknown>
+  variables: Record<string, unknown>,
+  skipExisting: boolean
 ): Promise<void> {
   await mkdir(destination, { recursive: true });
 
@@ -58,25 +62,31 @@ async function copyDirectory(
     const stats = await stat(sourcePath);
 
     if (stats.isDirectory()) {
-      await copyDirectory(sourcePath, destPath, variables);
+      await copyDirectory(sourcePath, destPath, variables, skipExisting);
+    } else if (entry.endsWith('.hbs')) {
+      const destPathWithoutHbs = destPath.replace(/\.hbs$/, '');
+      if (skipExisting && (await exists(destPathWithoutHbs))) continue;
+      const templateContent = await readFile(sourcePath, 'utf-8');
+      const template = Handlebars.compile(templateContent);
+      const rendered = template(variables);
+      await writeFile(destPathWithoutHbs, rendered);
+    } else if (entry.endsWith('.template')) {
+      const destPathWithoutTemplate = destPath.replace(/\.template$/, '');
+      if (skipExisting && (await exists(destPathWithoutTemplate))) continue;
+      const templateContent = await readFile(sourcePath, 'utf-8');
+      await writeFile(destPathWithoutTemplate, templateContent);
     } else {
-      // Check if file is a Handlebars template (.hbs)
-      if (entry.endsWith('.hbs')) {
-        // Read template, render with Handlebars, write without .hbs extension
-        const templateContent = await readFile(sourcePath, 'utf-8');
-        const template = Handlebars.compile(templateContent);
-        const rendered = template(variables);
-        const destPathWithoutHbs = destPath.replace(/\.hbs$/, '');
-        await writeFile(destPathWithoutHbs, rendered);
-      } else if (entry.endsWith('.template')) {
-        // Copy .template files without the .template extension
-        const templateContent = await readFile(sourcePath, 'utf-8');
-        const destPathWithoutTemplate = destPath.replace(/\.template$/, '');
-        await writeFile(destPathWithoutTemplate, templateContent);
-      } else {
-        // Copy file as-is
-        await copyFile(sourcePath, destPath);
-      }
+      if (skipExisting && (await exists(destPath))) continue;
+      await copyFile(sourcePath, destPath);
     }
+  }
+}
+
+async function exists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
   }
 }

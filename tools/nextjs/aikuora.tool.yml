@@ -1,0 +1,20 @@
+name: nextjs
+kind: none
+lang: typescript
+
+scaffold:
+  type: app
+  devtools:
+    - prettier
+    - tool: eslint
+      variant: nextjs
+    - tool: tsconfig
+      variant: nextjs
+  moonTasks:
+    - name: dev
+      command: next dev
+      args: ['--turbopack']
+    - name: build
+      command: next build
+    - name: start
+      command: next start

@@ -79,13 +79,9 @@ When `kind: shareable`, content goes to `packages/configs/src/prettier/` instead
 # tools/prettier/aikuora.tool.yml
 name: prettier
 lang: typescript
-runtime: node
-packageManager: pnpm
 kind: shareable              # contributes to packages/configs/src/prettier/
-
-prototools:
-  node: '22.x'
-  pnpm: '9.x'
+requires:
+  - pnpm                     # ensures pnpm → node → moon are set up first
 
 # Workspace-level integrations applied on aikuora add prettier
 workspace:
@@ -93,8 +89,13 @@ workspace:
     extensions:
       - esbenp.prettier-vscode
     settings:
-      editor.defaultFormatter: "esbenp.prettier-vscode"
       editor.formatOnSave: true
+      "[typescript]":
+        editor.defaultFormatter: "esbenp.prettier-vscode"
+      "[typescriptreact]":
+        editor.defaultFormatter: "esbenp.prettier-vscode"
+      "[json]":
+        editor.defaultFormatter: "esbenp.prettier-vscode"
   claude:
     hooks:
       PostFileWrite:
@@ -102,9 +103,6 @@ workspace:
           command: 'pnpm exec prettier --write "$FILE"'
   moon:
     file: typescript
-    inheritedBy:
-      toolchains:
-        or: [typescript]
     tasks:
       - name: format
         command: prettier
@@ -119,9 +117,7 @@ workspace:
 link:
   dependency: true # add as devDependency in target
   targetFile: 'prettier.config.mjs'
-  content: |
-    import config from "@{{scope}}/configs/prettier";
-    export default config;
+  content: "export { default } from '{{packageName}}';\n"
 ```
 
 ### 4.2 Scaffoldable Tool (e.g. nextjs)
@@ -142,34 +138,25 @@ tools/nextjs/
 ```yaml
 # tools/nextjs/aikuora.tool.yml
 name: nextjs
+kind: none
 lang: typescript
-runtime: node
-packageManager: pnpm
 
-prototools:
-  node: '22.x'
-  pnpm: '9.x'
-
-# Scaffold instructions
 scaffold:
   type: app # target directory: apps/
-  devtools: # tools to auto-link after scaffold
+  devtools: # tools to auto-link after scaffold (supports {tool, variant} for explicit variant)
     - prettier
-    - eslint
-    - tsconfig
-    - tailwind
-    - vite
+    - tool: eslint
+      variant: nextjs
+    - tool: tsconfig
+      variant: nextjs
   moonTasks:
     - name: dev
-      command: 'next dev'
+      command: next dev
+      args: ['--turbopack']
     - name: build
-      command: 'next build'
-    - name: lint
-      command: 'eslint .'
-    - name: format
-      command: 'prettier --write .'
-    - name: typecheck
-      command: 'tsc --noEmit'
+      command: next build
+    - name: start
+      command: next start
 ```
 
 ### 4.3 Hybrid Tool (e.g. tsconfig)
@@ -190,39 +177,36 @@ tools/tsconfig/
 ```yaml
 # tools/tsconfig/aikuora.tool.yml
 name: tsconfig
+kind: shareable
 lang: typescript
-runtime: node
-packageManager: pnpm
+requires:
+  - pnpm
 
-prototools:
-  node: '22.x'
-  pnpm: '9.x'
-
-# Linking with variant support
 link:
   dependency: true
-  targetFile: 'tsconfig.json'
+  targetFile: tsconfig.json
   content: |
     {
-      "extends": "@{{scope}}/tsconfig/{{variant}}.json",
-      "compilerOptions": {
-        "outDir": "dist",
-        "rootDir": "src"
-      },
+      "extends": "{{packageName}}/base.json",
+      "compilerOptions": { "outDir": "dist", "rootDir": "src" },
       "include": ["src"]
     }
   variants:
-    - name: base
+    - name: typescript
       default: true
     - name: nextjs
-      forTools: [nextjs] # auto-select when linking to a nextjs app
-    - name: library
-      forTools: [ts-library, orpc]
-    - name: expo
-      forTools: [expo]
-  moonTasks:
-    - name: typecheck
-      command: 'tsc --noEmit'
+      forTools: [nextjs]           # auto-select when linking to a nextjs app
+      content: |                   # per-variant content override
+        {
+          "extends": "{{packageName}}/base.json",
+          "compilerOptions": {
+            "lib": ["dom", "dom.iterable", "esnext"],
+            "jsx": "preserve",
+            "moduleResolution": "bundler",
+            "noEmit": true
+          },
+          "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx"]
+        }
 ```
 
 ### 4.4 Tool with Dependents (e.g. shadcn — UI package tool)
@@ -244,13 +228,8 @@ tools/shadcn/
 ```yaml
 # tools/shadcn/aikuora.tool.yml
 name: shadcn
+kind: none
 lang: typescript
-runtime: node
-packageManager: pnpm
-
-prototools:
-  node: '22.x'
-  pnpm: '9.x'
 
 scaffold:
   type: package
@@ -301,13 +280,8 @@ tools/ruff/
 ```yaml
 # tools/ruff/aikuora.tool.yml
 name: ruff
+kind: shareable
 lang: python
-runtime: python
-packageManager: uv
-
-prototools:
-  python: '3.12.x'
-  uv: 'latest'
 
 link:
   dependency: false # no npm dependency for python tools
@@ -323,19 +297,32 @@ link:
 
 ```
 cli/tools/                          # Shipped with the CLI package
-├── prettier/                       # Linkable: JS/TS formatter
-├── eslint/                         # Linkable: JS/TS linter (flat config)
-├── tsconfig/                       # Hybrid: TS config with variants
-├── ruff/                           # Linkable: Python linter/formatter
-├── vite/                           # Linkable: build config
-├── tailwind/                       # Linkable: CSS framework preset
-├── nextjs/                         # Scaffoldable: Next.js app
-├── expo/                           # Scaffoldable: Expo React Native app
-├── ts-library/                     # Scaffoldable: TypeScript library
-├── python-library/                 # Scaffoldable: Python library
-├── orpc/                           # Scaffoldable: oRPC service package
-└── langchain/                      # Scaffoldable: LangChain agent/chain
+│
+│   Root tools (kind: root) — set up at workspace level, pinned to .prototools
+├── moon/                           # Root: Moonrepo (pinned to .prototools)
+├── node/                           # Root: Node.js runtime + package.json + toolchains.yml
+├── pnpm/                           # Root: pnpm + pnpm-workspace.yaml (requires: node)
+│
+│   Shareable tools (kind: shareable) — contribute to packages/configs/
+├── prettier/                       # Shareable: JS/TS formatter (requires: pnpm)
+├── eslint/                         # Shareable: JS/TS linter flat config (requires: pnpm)
+├── tsconfig/                       # Shareable: TS config with variants (requires: pnpm)
+├── ruff/                           # Shareable: Python linter/formatter
+├── vite/                           # Shareable: build config
+├── tailwind/                       # Shareable: CSS framework preset
+│
+│   Scaffoldable tools (kind: none) — scaffold apps/packages/modules
+├── nextjs/                         # Scaffoldable → apps/; auto-links prettier+eslint+tsconfig
+├── expo/                           # Scaffoldable → apps/
+├── ts-library/                     # Scaffoldable → packages/
+├── python-library/                 # Scaffoldable → packages/
+├── orpc/                           # Scaffoldable → packages/
+└── langchain/                      # Scaffoldable → modules/
 ```
+
+**Dependency chain for JS/TS tools**: `prettier / eslint / tsconfig → pnpm → node → moon`
+
+When `aikuora add prettier` (or any JS shareable tool) runs, it first calls `ensureRequiredTools(['pnpm'])`, which recursively sets up `node` (writes `package.json` + `toolchains.yml`) and then `moon` (pinned in `.prototools`). All tools in the chain are idempotent — already-installed tools are skipped.
 
 ---
 
@@ -1053,11 +1040,17 @@ Reduction: ~93% fewer tokens, ~87% fewer tool calls
 // Validated schema for aikuora.tool.yml per tool
 interface ToolConfig {
   name: string;
-  lang: 'typescript' | 'python';
-  runtime: 'node' | 'python';
-  packageManager: 'pnpm' | 'uv';
   kind?: 'shareable' | 'root' | 'none'; // default: 'none'
-  prototools: Record<string, string>;
+  lang?: 'typescript' | 'python';
+  customizable?: boolean;               // allows `add --local` fork; default: false
+
+  // Root tool fields (kind: root only)
+  installer?: 'proto';                  // install via proto
+  version?: string;                     // version/alias passed to proto pin --resolve
+  requires?: string[];                  // root tools that must be set up first
+
+  // Scaffold-time prototools overrides (for non-root tools that need specific versions)
+  prototools?: Record<string, string>;
 
   // Workspace-level integrations applied on aikuora add <tool> (shareable mode)
   workspace?: WorkspaceConfig;
@@ -1071,6 +1064,7 @@ interface ToolConfig {
       name: string;
       default?: boolean;
       forTools?: string[]; // auto-select for these scaffold tools
+      content?: string;    // per-variant content override (replaces link.content)
     }[];
     moonTasks?: MoonTask[]; // plural; supports args and options
   };
@@ -1078,7 +1072,7 @@ interface ToolConfig {
   // Present if tool has templates/ (scaffoldable)
   scaffold?: {
     type: 'app' | 'package' | 'module';
-    devtools: string[];
+    devtools: (string | { tool: string; variant: string })[]; // explicit variant selection
     moonTasks: MoonTask[];
   };
 }
@@ -1111,8 +1105,7 @@ interface ClaudeHookEntry {
 }
 
 interface MoonInheritance {
-  file: string; // .moon/tasks/<file>.yml
-  inheritedBy?: Record<string, unknown>;
+  file: string; // .moon/tasks/<file>.yml — Moon inherits tasks to all projects with matching `language`
   tasks: MoonTask[];
 }
 ```
@@ -1149,20 +1142,36 @@ interface MoonInheritance {
 
 **Architectural decisions completed**:
 - `kind: shareable | root | none` field in tool schema
-- Consolidated `packages/configs/` package (wildcard exports `"./*": "./src/*/index.mjs"`)
+- Removed `packageManager` / `runtime` fields — no longer in schema or any tool YAML
+- `installer` / `version` / `requires` fields for root tools
+- Consolidated `packages/configs/` package — per-tool export patterns (one `*` per pattern)
 - Renamed `configs/` → `template/` for tool content; capability detection updated
 - `workspace` config block (vscode, claude, moon) with idempotent merge behavior
-- Moon task inheritance system (`workspace.moon` → `.moon/tasks/<file>.yml`)
+- Moon task inheritance via `language` field in project `moon.yml` (no `inheritedBy`)
 - `moonTasks` plural in `linkConfig` with `args` and `options` support
-- `runShareable` mode in `add` command + `applyWorkspaceSettings()`
+- `runShareable` + `runRoot` modes in `add` command + `applyWorkspaceSettings()`
 - Fixed `getBuiltInToolsPath()` context-aware path resolution
 - Removed `tools/` directory creation from `init`
+- `proto pin --resolve` to store actual versions in `.prototools` (e.g. `22.14.0` not `lts`)
+- `.prototools` formatting: blank line before `[settings]`, no accumulation on repeated runs
+- Root tool scanner fix: tools with only `aikuora.tool.yml` (no `template/`) now discoverable
+- `skipExisting` option in `renderAndCopy` — root tools never overwrite user-modified files
+- Moon v2: `toolchains.yml` (with `javascript` section), `vcs.manager`, double quotes throughout
+- `devtoolEntrySchema`: scaffold devtools support `{tool, variant}` for explicit variant selection
+- Per-variant `content` field in `linkVariantSchema` (overrides `link.content` for that variant)
+- `sortDeps`: all `package.json` deps sorted alphabetically
+- `ensureRootPeerDeps`: peerDependencies from tool templates propagated to root `package.json`
 
 **Built-in tools**:
-- ✅ prettier (shareable, with vscode + claude + moon workspace config)
-- Remaining linkable tools: eslint, tsconfig, ruff, vite, tailwind
-- Scaffoldable tools: nextjs, ts-library, expo, python-library, orpc, langchain
-- `sync`, `info`, `list` commands
+- ✅ moon (root)
+- ✅ node (root — writes `package.json` + `.moon/toolchains.yml`)
+- ✅ pnpm (root — writes `pnpm-workspace.yaml`, requires: node)
+- ✅ prettier (shareable — workspace: vscode + claude + moon)
+- ✅ eslint (shareable — nextjs variant)
+- ✅ tsconfig (shareable — typescript + nextjs variants with per-variant content)
+- ✅ nextjs (scaffoldable → apps/ — auto-links: prettier + eslint/nextjs + tsconfig/nextjs)
+- Remaining: vitest, tsup, tailwind, shadcn, commitlint, lefthook, release-please
+- Commands: `sync`, `info`, `list`
 
 ### Phase 4: Claude Code Plugin
 

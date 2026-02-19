@@ -715,51 +715,164 @@ Moon reads this file and applies tasks to all projects matching the `inheritedBy
 
 ---
 
-### 3.6 First built-in tool: `prettier`
-
-**Status**: ✅ Completed
-
-**Files**:
+### 3.6 Built-in tool: `prettier` — Status: Completed
 
 ```
 tools/prettier/
-├── aikuora.tool.yml      # kind: shareable, workspace config (vscode + claude + moon), link config
+├── aikuora.tool.yml      # kind: shareable, requires: [pnpm], workspace config, link config
 └── template/
     ├── index.mjs         # prettier config using @ianvs/prettier-plugin-sort-imports
-    └── package.json      # dependencies: { "@ianvs/prettier-plugin-sort-imports": "^4.4.2" }
-                          # devDependencies: { prettier: "^3.5.1" }
+    └── package.json      # dependencies: { "@ianvs/prettier-plugin-sort-imports" }
 ```
 
-**`aikuora.tool.yml`**:
+- `kind: shareable`, `requires: [pnpm]` — triggers the `pnpm → node → moon` chain
+- `workspace.vscode`: language-specific formatter settings per file type (not generic `editor.defaultFormatter`)
+- `workspace.claude`: PostFileWrite hook for `prettier --write "$FILE"`
+- `workspace.moon`: `format` and `format-check` tasks → `.moon/tasks/typescript.yml`
 
-- `kind: shareable` — contributes to `packages/configs/src/prettier/`
-- `workspace.vscode`: recommends `esbenp.prettier-vscode`, sets `editor.defaultFormatter` and `editor.formatOnSave`
-- `workspace.claude`: adds PostFileWrite hook to run `prettier --write "$FILE"` on all JS/TS/JSON/MD/CSS/YAML files
-- `workspace.moon`: writes `format` and `format-check` tasks to `.moon/tasks/typescript.yml`
+New schema types: `MoonTaskOptions`, `MoonInheritance`, `ClaudeHookEntry`, `WorkspaceConfig`
 
-**New schema types exported** from `src/types/tool-config.ts`:
+New `add` modes: `runShareable` (kind: shareable), `runRoot` (kind: root)
 
-- `MoonTaskOptions`, `MoonInheritance`, `ClaudeHookEntry`, `WorkspaceConfig`
-
-**New `add` command mode**:
-
-- `runShareable`: invoked when `aikuora add <tool>` is called with no target, no `--name`, and no `--local` for a tool with `kind: shareable`. Creates `packages/configs/src/<name>/` and calls `applyWorkspaceSettings()`.
-- Ink display mode `'install'`: shows "Installing prettier…" (instead of the link-mode "Linking prettier to undefined").
-
-**`getBuiltInToolsPath()` bug fix**: Now detects execution context by checking the parent directory name:
-- Parent dir is `dist/` (bundled production): goes up 1 level to reach CLI root
-- Parent dir is `src/core/` (dev/test): goes up 2 levels to reach CLI root
-
-**`init` command change**: `tools/` directory is no longer created by `initCommand`. The `tools/` directory only appears when the user explicitly runs `aikuora add <tool> --local`.
+`getBuiltInToolsPath()` fix: detects context from parent dir name (`dist/` vs `src/core/`).
+`init` no longer creates `tools/` — only via `aikuora add <tool> --local`.
 
 ---
 
-## Phase 4: Claude Code Plugin
+### 3.7 Built-in tool: `eslint` — Status: Completed
 
-**Status**: Not Started
+```
+tools/eslint/
+├── aikuora.tool.yml      # kind: shareable, requires: [pnpm], workspace config, link config
+└── template/
+    ├── index.mjs         # base eslint flat config (typescript-eslint)
+    ├── nextjs.mjs        # nextjs variant (extends base + Next.js plugin)
+    └── package.json      # peerDependencies: eslint, typescript-eslint, eslint-plugin-react, etc.
+```
+
+- Export pattern: `./eslint/*` → `./src/eslint/*.mjs` (multiple variants → wildcard)
+- `link.variants`: `typescript` (default), `nextjs` (forTools: [nextjs] — auto-selected)
+- `workspace.moon`: `lint` task → `.moon/tasks/typescript.yml`
 
 ---
 
-## Phase 5: Publish
+### 3.8 Built-in tool: `tsconfig` — Status: Completed
 
-**Status**: Not Started
+```
+tools/tsconfig/
+├── aikuora.tool.yml      # kind: shareable, requires: [pnpm], variants: typescript + nextjs
+└── template/
+    ├── base.json         # base tsconfig (strict mode, ES2022)
+    └── package.json
+```
+
+- Export pattern: `./tsconfig/*.json` → `./src/tsconfig/*.json`
+- `link.dependency: true` — adds `@scope/configs` to target devDependencies
+- `link.variants`:
+  - `typescript` (default): extends `base.json`, basic outDir/rootDir
+  - `nextjs` (forTools: [nextjs]): per-variant `content` override — Next.js compiler options (jsx, moduleResolution: bundler, noEmit, dom libs)
+- `workspace.moon`: `typecheck` task → `.moon/tasks/typescript.yml`
+
+**Per-variant `content` field**: when a variant declares `content`, it overrides `link.content` for that variant. Enables structurally different config files per target type from a single tool.
+
+---
+
+### 3.9 Built-in tool: `nextjs` — Status: Completed
+
+```
+tools/nextjs/
+├── aikuora.tool.yml      # kind: none, lang: typescript, scaffold config
+└── templates/
+    ├── package.json.hbs  # next ^16, react 19, typescript devDeps
+    ├── next.config.ts
+    ├── src/app/layout.tsx.hbs
+    ├── src/app/page.tsx
+    └── src/app/globals.css
+```
+
+- `kind: none` — pure scaffold, no shared package
+- `lang: typescript` — project `moon.yml` gets `language: typescript` enabling task inheritance
+- `scaffold.devtools`: uses `{tool, variant}` entries for explicit variant selection:
+  ```yaml
+  devtools:
+    - prettier
+    - tool: eslint
+      variant: nextjs
+    - tool: tsconfig
+      variant: nextjs
+  ```
+- Moon tasks: `dev --turbopack`, `build`, `start`
+
+**`devtoolEntrySchema`**: `z.union([z.string(), z.object({ tool, variant })])` — added to schema so scaffold tools can explicitly request a specific variant when auto-linking.
+
+---
+
+### 3.10 Root tools: `moon`, `node`, `pnpm` — Status: Completed
+
+**Root tool concept**: `kind: root` tools set up workspace-level infrastructure. They render `template/` to the project root (`skipExisting: true`) and pin their version to `.prototools` via `proto pin --resolve`.
+
+**Dependency chain**: `shareable tools → pnpm → node → moon`
+
+Each link in the chain declares `requires: [<next>]`. `ensureRequiredTools` recursively calls `runRoot` for each dependency before the current tool proceeds.
+
+**`moon` tool** (`tools/moon/aikuora.tool.yml`):
+- `kind: root`, `installer: proto`, `version: latest`
+- No `template/` — only pinned to `.prototools`
+
+**`node` tool** (`tools/node/`):
+- `kind: root`, `installer: proto`, `version: lts`, `requires: [moon]`
+- `template/package.json.hbs`: minimal workspace root package.json (skipExisting)
+- `template/.moon/toolchains.yml.hbs`: Moon v2 toolchains with `javascript` section:
+  ```yaml
+  javascript:
+    dedupeOnLockfileChange: true
+    inferTasksFromScripts: false
+    packageManager: pnpm
+    syncProjectWorkspaceDependencies: true
+  ```
+
+**`pnpm` tool** (`tools/pnpm/`):
+- `kind: root`, `installer: proto`, `version: latest`, `requires: [node]`
+- `template/pnpm-workspace.yaml.hbs`
+
+**`proto pin --resolve`** (`pinProtoVersion` in `src/utils/prototools.ts`):
+- Skips if tool already present (idempotent)
+- Calls `proto pin <tool> <version> --resolve --to local --yes` — stores real version (e.g. `22.14.0` not `lts`)
+- Falls back to `updatePrototools` if proto unavailable
+- `reformatPrototools()` restores blank line before `[settings]` after proto pin
+
+**Scanner fix** (`src/core/scanner.ts`): `scanToolDirectory` now includes any directory with `aikuora.tool.yml` (not just those with `template/` or `templates/`). Root-only tools like `moon` were previously invisible to `resolveTool()`, causing silent failures.
+
+---
+
+### 3.11 Schema and codebase fixes — Status: Completed
+
+**Removed `packageManager` field**: never used in any code path (Moon manages package manager via `toolchains.yml`). Removed from schema, all tool YAMLs, and tests.
+
+**Removed `inheritedBy`**: not valid in Moon v2. Tasks in `.moon/tasks/<lang>.yml` are automatically inherited by projects with `language: <lang>` in `moon.yml`. `buildMoonConfig(tasks, language?)` now adds `$schema` and optional `language` field.
+
+**Fixed `vcs.manager`**: was `vcs.client` in `workspace.yml.hbs` template (invalid in Moon v2).
+
+**Double quotes in Moon YAML**: `stringify` calls in `moon.ts` use `defaultStringType: 'QUOTE_DOUBLE'`; all `.hbs` templates updated.
+
+**Per-tool export patterns** (`buildToolExportPatterns()`): generates `./prettier`, `./eslint/*`, `./tsconfig/*.json` based on files in `template/`. Node.js exports only allow one `*` per pattern — old `"./*/*.json"` (two wildcards) was invalid.
+
+**`configsName` vs `packageName`**: `ensureConfigsEntry` returns both. `runLink` uses `configsName` (e.g. `@scope/configs`) for `devDependencies`, not `packageName` (e.g. `@scope/configs/eslint`).
+
+**`sortDeps()`**: sorts all `package.json` dependency keys alphabetically. Applied everywhere deps are merged.
+
+**`ensureRootPeerDeps()`**: propagates peerDependencies from tool `template/package.json` to root workspace `package.json` devDependencies (new keys only, idempotent).
+
+**`runLink` workspace fix**: was only handling moon tasks manually; now calls `applyWorkspaceSettings()` for all workspace integrations (vscode settings, extensions, claude hooks, moon tasks).
+
+**`.prototools` blank line fix**: each insertion was appending a new blank separator line before `[settings]`. Fixed by walking back past existing blank lines and replacing them with exactly one separator.
+
+**`skipExisting` option**: `renderAndCopy`/`copyDirectory` support `{ skipExisting: true }`. Root tools always use this to protect user-modified files on re-runs.
+
+---
+
+## Phase 4: Claude Code Plugin — Status: Not Started
+
+---
+
+## Phase 5: Publish — Status: Not Started

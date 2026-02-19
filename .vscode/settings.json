@@ -8,7 +8,9 @@
   "[yaml]": {
     "editor.defaultFormatter": "redhat.vscode-yaml"
   },
-  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "[markdown]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
   "editor.formatOnSave": true,
   "editor.codeLens": false,
   "cSpell.words": ["aikuora"]

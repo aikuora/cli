@@ -1,7 +1,6 @@
 name: eslint
 kind: shareable
 lang: typescript
-packageManager: pnpm
 requires:
   - pnpm
 
@@ -22,9 +21,6 @@ workspace:
           command: 'pnpm exec eslint --fix "$FILE" || true'
   moon:
     file: typescript
-    inheritedBy:
-      toolchains:
-        or: [typescript]
     tasks:
       - name: lint
         command: eslint

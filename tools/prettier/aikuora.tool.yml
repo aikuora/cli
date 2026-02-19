@@ -1,7 +1,6 @@
 name: prettier
 kind: shareable
 lang: typescript
-packageManager: pnpm
 requires:
   - pnpm
 
@@ -10,8 +9,15 @@ workspace:
     extensions:
       - "esbenp.prettier-vscode"
     settings:
-      editor.defaultFormatter: "esbenp.prettier-vscode"
       editor.formatOnSave: true
+      "[typescript]":
+        editor.defaultFormatter: "esbenp.prettier-vscode"
+      "[typescriptreact]":
+        editor.defaultFormatter: "esbenp.prettier-vscode"
+      "[markdown]":
+        editor.defaultFormatter: "esbenp.prettier-vscode"
+      "[json]":
+        editor.defaultFormatter: "esbenp.prettier-vscode"
   claude:
     hooks:
       PostFileWrite:
@@ -19,9 +25,6 @@ workspace:
           command: 'pnpm exec prettier --write "$FILE"'
   moon:
     file: typescript
-    inheritedBy:
-      toolchains:
-        or: [typescript]
     tasks:
       - name: format
         command: prettier

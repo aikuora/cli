@@ -1,6 +1,6 @@
-name: pnpm
+name: node
 kind: root
 installer: proto
-version: latest
+version: lts
 requires:
-  - node
+  - moon

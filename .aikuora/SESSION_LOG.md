@@ -30,12 +30,13 @@
 
 ---
 
-## 2026-02-19 — Phase 3: vitest + tsup tools
+## 2026-02-19 — Phase 3: vitest + tsup + tailwind tools
 
 **Work done:**
 
 - Implemented `vitest` tool (P3-08): `kind: shareable`, `lang: typescript`, moon tasks `test` + `test-watch`, VS Code extension `vitest.explorer`, `coverage` added to `.gitignore`. Template: `index.mjs` with `defineConfig` (globals, node env, v8 coverage).
 - Implemented `tsup` tool (P3-09): `kind: shareable`, `lang: typescript`, moon task `build`, `dist` added to `.gitignore`. 4 variants con opciones específicas por caso de uso (ver decisiones).
+- Implemented `tailwind` tool (P3-10): `kind: shareable`, Tailwind CSS v4, PostCSS integration via `@tailwindcss/postcss`, VS Code extension `bradlc.vscode-tailwindcss`. No shared JS config (v4 is CSS-first). Template only has `package.json` which merges `tailwindcss ^4.0.0` and `@tailwindcss/postcss ^4.0.0` into `packages/configs/package.json`.
 
 **Decisions made:**
 
@@ -46,16 +47,18 @@
   - `dual`: ESM+CJS, `platform: neutral`, `outExtension: { '.js': '.mjs' }`
 - `react` y `dual` usan `outExtension: { '.js': '.mjs' }` — requiere que el `package.json` de cada proyecto referencie `.mjs`/`.cjs` en sus `exports`
 - `jsxImportSource: 'react'` omitido de `react.mjs` — es redundante porque es el default cuando `jsx: 'automatic'`
+- `tailwind` tool has no `index.mjs` in template — Tailwind v4 is CSS-first, no JS config to share; the deliverable is `postcss.config.mjs` generated directly via `link.content`
+- `template/package.json` in shareable tools acts as a dependency manifest that gets merged into `packages/configs/package.json`, making deps available workspace-wide via pnpm hoisting
 
 **Project state:**
 
-- Phase 3 (Built-in Tools): 64% (9/14) — root + prettier + eslint + tsconfig + nextjs + vitest + tsup done; tailwind, shadcn, commitlint, lefthook, release-please + sync/info/list pending
+- Phase 3 (Built-in Tools): 71% (10/14) — root + prettier + eslint + tsconfig + nextjs + vitest + tsup + tailwind done; shadcn, commitlint, lefthook, release-please + sync/info/list pending
 
 **Next session should:**
 
-1. Implement `sync`, `info`, `list` commands (P3-15, P3-16, P3-17) — infrastructure before heavier tools
-2. Implement `tailwind` tool (P3-10) after commands are stable
-3. Consider `commitlint` + `lefthook` (P3-12, P3-13) as a pair since they're tightly coupled
+1. Implement `sync`, `info`, `list` commands (P3-15, P3-16, P3-17)
+2. Implement `commitlint` + `lefthook` (P3-12, P3-13) as a coupled pair
+3. Implement `shadcn` (P3-11) and `release-please` (P3-14)
 
 ---
 

@@ -2,15 +2,15 @@
 
 ## Progress Overview
 
-| Phase | Description | Done | Total | Progress |
-|---|---|---|---|---|
-| Phase 0 | Project Setup & Core Infrastructure | 7 | 7 | 100% |
-| Phase 1 | CLI Core + Scanner | 7 | 7 | 100% |
-| Phase 2 | `add` Command (Unified) | 11 | 11 | 100% |
-| Phase 3 | Built-in Tools | 9 | 14 | 64% |
-| Phase 4 | Claude Code Plugin | 0 | 5 | 0% |
-| Phase 5 | Publish | 0 | 3 | 0% |
-| Backlog | Future Enhancements | 0 | 5 | 0% |
+| Phase   | Description                         | Done | Total | Progress |
+| ------- | ----------------------------------- | ---- | ----- | -------- |
+| Phase 0 | Project Setup & Core Infrastructure | 7    | 7     | 100%     |
+| Phase 1 | CLI Core + Scanner                  | 7    | 7     | 100%     |
+| Phase 2 | `add` Command (Unified)             | 11   | 11    | 100%     |
+| Phase 3 | Built-in Tools                      | 10   | 14    | 71%      |
+| Phase 4 | Claude Code Plugin                  | 0    | 5     | 0%       |
+| Phase 5 | Publish                             | 0    | 3     | 0%       |
+| Backlog | Future Enhancements                 | 0    | 5     | 0%       |
 
 **Legend:** `[ ]` Pending | `[~]` In Progress | `[x]` Done | `[!]` Blocked | `[-]` Cancelled
 
@@ -59,26 +59,30 @@
 ## Phase 3 — Built-in Tools
 
 ### Root Tools (kind: root)
+
 - [x] P3-01 `moon` tool: `kind: root`, `installer: proto`, `version: latest` — pinned to `.prototools`
 - [x] P3-02 `node` tool: `kind: root`, writes `package.json` + `.moon/toolchains.yml` with `javascript` section (Moon v2)
 - [x] P3-03 `pnpm` tool: `kind: root`, writes `pnpm-workspace.yaml`, `requires: [node]`
 
 ### Shareable Tools (kind: shareable)
+
 - [x] P3-04 `prettier` tool: shareable, workspace: vscode + claude (PostFileWrite hook) + moon (`format` + `format-check` tasks)
 - [x] P3-05 `eslint` tool: shareable, variants: `typescript` (default) + `nextjs` (forTools: [nextjs]), moon: `lint` task
 - [x] P3-06 `tsconfig` tool: shareable, variants: `typescript` + `nextjs` with per-variant content override, moon: `typecheck` task
 
 ### Scaffoldable Tools (kind: none)
+
 - [x] P3-07 `nextjs` tool: scaffoldable → `apps/`, `lang: typescript`, auto-links prettier + eslint/nextjs + tsconfig/nextjs, moon tasks: dev + build + start
 - [x] P3-08 `vitest` tool: shareable, moon tasks: `test` + `test-watch`
 - [x] P3-09 `tsup` tool: shareable, moon task: `build`
-- [ ] P3-10 `tailwind` tool: shareable, PostCSS integration
+- [x] P3-10 `tailwind` tool: shareable, PostCSS integration
 - [ ] P3-11 `shadcn` tool: scaffoldable → `packages/`, integration handlers for nextjs + expo
 - [ ] P3-12 `commitlint` tool: `kind: root`, git hook via lefthook
 - [ ] P3-13 `lefthook` tool: `kind: root`, writes `lefthook.yml` at workspace root
 - [ ] P3-14 `release-please` tool: `kind: root`
 
 ### Phase 3 Commands
+
 - [ ] P3-15 `sync` command: verify `.prototools`, `workspace.yml`, `pnpm-workspace.yaml`, and tool link consistency
 - [ ] P3-16 `info` command: return JSON with all apps/packages/modules, tools, and runtimes
 - [ ] P3-17 `list` command: list discovered tools grouped by capability (linkable / scaffoldable / hybrid)

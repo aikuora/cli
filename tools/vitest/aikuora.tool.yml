@@ -1,0 +1,30 @@
+name: vitest
+kind: shareable
+lang: typescript
+requires:
+  - pnpm
+
+workspace:
+  vscode:
+    extensions:
+      - "vitest.explorer"
+  moon:
+    file: typescript
+    tasks:
+      - name: test
+        command: vitest
+        args: ['run']
+        options:
+          cache: false
+      - name: test-watch
+        command: vitest
+        args: ['watch']
+        options:
+          cache: false
+  gitignore:
+    - coverage
+
+link:
+  dependency: true
+  targetFile: vitest.config.ts
+  content: "export { default } from '{{packageName}}';\n"

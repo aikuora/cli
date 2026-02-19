@@ -6,6 +6,7 @@ scaffold:
   type: app
   devtools:
     - prettier
+    - tailwind
     - tool: eslint
       variant: nextjs
     - tool: tsconfig
@@ -13,7 +14,6 @@ scaffold:
   moonTasks:
     - name: dev
       command: next dev
-      args: ['--turbopack']
     - name: build
       command: next build
     - name: start

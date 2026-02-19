@@ -45,7 +45,7 @@ export function buildMoonConfig(tasks: MoonTask[], language?: string): object {
  * Write a moon.yml file at the given path, with blank lines between tasks.
  */
 export async function writeMoonYml(filePath: string, config: object): Promise<void> {
-  const content = stringify(config, { lineWidth: 100, indent: 2, defaultStringType: 'QUOTE_DOUBLE' });
+  const content = stringify(config, { lineWidth: 100, indent: 2 });
   await writeFile(filePath, formatTasksYaml(content), 'utf-8');
 }
 
@@ -163,6 +163,6 @@ export async function addInheritedMoonTasks(
     tasks,
   };
 
-  const raw = stringify(finalConfig, { lineWidth: 100, indent: 2, defaultStringType: 'QUOTE_DOUBLE' });
+  const raw = stringify(finalConfig, { lineWidth: 100, indent: 2 });
   await writeFile(filePath, formatTasksYaml(raw), 'utf-8');
 }

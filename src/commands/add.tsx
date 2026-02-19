@@ -353,18 +353,19 @@ async function mergeJsonFile(filePath: string, patch: Record<string, unknown>): 
 
 async function mergeClaudeHooks(
   filePath: string,
-  hooks: Record<string, Array<{ matcher: string; command: string }>>
+  hooks: Record<string, Array<{ matcher: string; hooks: Array<{ type: string; command: string }> }>>
 ): Promise<void> {
   let existing: Record<string, unknown> = {};
   if (existsSync(filePath)) {
     existing = JSON.parse(readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
   }
-  const existingHooks = (existing.hooks as Record<string, Array<{ command: string }>>) ?? {};
+  const existingHooks =
+    (existing.hooks as Record<string, Array<{ matcher: string }>> ) ?? {};
 
   for (const [event, newHooks] of Object.entries(hooks)) {
     const current = existingHooks[event] ?? [];
     for (const hook of newHooks) {
-      if (!current.some((h) => h.command === hook.command)) {
+      if (!current.some((h) => h.matcher === hook.matcher)) {
         current.push(hook);
       }
     }

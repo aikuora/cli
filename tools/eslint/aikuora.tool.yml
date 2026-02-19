@@ -16,9 +16,13 @@ workspace:
         source.fixAll.eslint: "explicit"
   claude:
     hooks:
-      PostFileWrite:
-        - matcher: "*.{js,jsx,ts,tsx}"
-          command: 'pnpm exec eslint --fix "$FILE" || true'
+      PostToolUse:
+        - matcher: Write|Edit
+          hooks:
+            - type: command
+              command: |
+                FILE=$(cat | jq -r '.tool_input.file_path // empty')
+                [[ "$FILE" =~ \.(js|jsx|ts|tsx)$ ]] && pnpm exec eslint --fix "$FILE" || true
   moon:
     file: typescript
     tasks:

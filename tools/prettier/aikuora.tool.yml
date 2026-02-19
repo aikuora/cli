@@ -20,9 +20,13 @@ workspace:
         editor.defaultFormatter: "esbenp.prettier-vscode"
   claude:
     hooks:
-      PostFileWrite:
-        - matcher: "*.{js,jsx,ts,tsx,mjs,cjs,json,md,css,scss,yaml,yml}"
-          command: 'pnpm exec prettier --write "$FILE"'
+      PostToolUse:
+        - matcher: Write|Edit
+          hooks:
+            - type: command
+              command: |
+                FILE=$(cat | jq -r '.tool_input.file_path // empty')
+                [[ "$FILE" =~ \.(js|jsx|ts|tsx|mjs|cjs|json|md|css|scss|yaml|yml)$ ]] && pnpm exec prettier --write "$FILE" || true
   moon:
     file: typescript
     tasks:

@@ -44,9 +44,16 @@ export const scaffoldConfigSchema = z.object({
   moonTasks: z.array(moonTaskSchema),
 });
 
-export const claudeHookEntrySchema = z.object({
-  matcher: z.string(),
+export const claudeHookCommandSchema = z.object({
+  type: z.literal('command'),
   command: z.string(),
+  timeout: z.number().optional(),
+});
+
+export const claudeHookEntrySchema = z.object({
+  /** Matches the Claude tool name, e.g. "Write|Edit" */
+  matcher: z.string(),
+  hooks: z.array(claudeHookCommandSchema),
 });
 
 export const workspaceConfigSchema = z.object({

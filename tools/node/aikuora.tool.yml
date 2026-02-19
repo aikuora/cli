@@ -4,3 +4,7 @@ installer: proto
 version: lts
 requires:
   - moon
+
+workspace:
+  gitignore:
+    - node_modules

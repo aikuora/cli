@@ -114,7 +114,7 @@ async function runRoot(options: AddOptions): Promise<{ success: boolean }> {
 
   // Apply workspace settings (vscode, claude hooks, moon tasks)
   if (toolConfig.workspace) {
-    await applyWorkspaceSettings(projectRoot, toolConfig.workspace);
+    await applyWorkspaceSettings(projectRoot, toolConfig.workspace, toolName);
   }
 
   const result = { action: 'add', mode: 'root', success: true, tool: toolName };
@@ -391,9 +391,34 @@ async function mergeVscodeExtensions(filePath: string, extensions: string[]): Pr
   await writeFile(filePath, JSON.stringify({ ...existing, recommendations: current }, null, 2) + '\n', 'utf-8');
 }
 
+async function mergeGitignore(
+  filePath: string,
+  patterns: string[],
+  toolName?: string
+): Promise<void> {
+  let existing = '';
+  if (existsSync(filePath)) {
+    existing = readFileSync(filePath, 'utf-8');
+  }
+
+  const existingPatterns = new Set(
+    existing.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))
+  );
+
+  const newPatterns = patterns.filter((p) => !existingPatterns.has(p));
+  if (newPatterns.length === 0) return;
+
+  const base = !existing || existing.endsWith('\n') ? existing : existing + '\n';
+  const separator = base ? '\n' : '';
+  const block = separator + (toolName ? `# ${toolName}\n` : '') + newPatterns.join('\n') + '\n';
+  await mkdir(join(filePath, '..'), { recursive: true });
+  await writeFile(filePath, base + block, 'utf-8');
+}
+
 async function applyWorkspaceSettings(
   projectRoot: string,
-  workspace: WorkspaceConfig
+  workspace: WorkspaceConfig,
+  toolName?: string
 ): Promise<void> {
   if (workspace.vscode?.settings) {
     await mergeJsonFile(
@@ -415,6 +440,9 @@ async function applyWorkspaceSettings(
   }
   if (workspace.moon) {
     await addInheritedMoonTasks(projectRoot, workspace.moon);
+  }
+  if (workspace.gitignore && workspace.gitignore.length > 0) {
+    await mergeGitignore(join(projectRoot, '.gitignore'), workspace.gitignore, toolName);
   }
 }
 
@@ -570,7 +598,7 @@ async function runShareable(options: AddOptions) {
   );
 
   if (toolConfig.workspace) {
-    await applyWorkspaceSettings(projectRoot, toolConfig.workspace);
+    await applyWorkspaceSettings(projectRoot, toolConfig.workspace, toolName);
   }
 
   const destination = entryPath.replace(projectRoot + '/', '');
@@ -704,7 +732,7 @@ async function runLink(options: AddOptions) {
   // Apply all workspace integrations: vscode settings/extensions, claude hooks, moon tasks
   const moonTasksAdded: string[] = [];
   if (toolConfig.workspace) {
-    await applyWorkspaceSettings(projectRoot, toolConfig.workspace);
+    await applyWorkspaceSettings(projectRoot, toolConfig.workspace, toolName);
     if (toolConfig.workspace.moon) {
       moonTasksAdded.push(...toolConfig.workspace.moon.tasks.map((t) => t.name));
     }

@@ -82,6 +82,11 @@ export const workspaceConfigSchema = z.object({
       tasks: z.array(moonTaskSchema),
     })
     .optional(),
+  /**
+   * Patterns to append to the root `.gitignore`.
+   * Only patterns not already present are added (idempotent).
+   */
+  gitignore: z.array(z.string()).optional(),
 });
 
 export const toolConfigSchema = z.object({

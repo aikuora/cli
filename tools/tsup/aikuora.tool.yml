@@ -1,0 +1,27 @@
+name: tsup
+kind: shareable
+lang: typescript
+requires:
+  - pnpm
+
+workspace:
+  moon:
+    file: typescript
+    tasks:
+      - name: build
+        command: tsup
+        options:
+          cache: true
+  gitignore:
+    - dist
+
+link:
+  dependency: true
+  targetFile: tsup.config.ts
+  content: "export { default } from '{{packageName}}/{{variant}}';\n"
+  variants:
+    - name: library
+      default: true
+    - name: cli
+    - name: react
+    - name: dual

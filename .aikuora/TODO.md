@@ -7,7 +7,7 @@
 | Phase 0 | Project Setup & Core Infrastructure | 7 | 7 | 100% |
 | Phase 1 | CLI Core + Scanner | 7 | 7 | 100% |
 | Phase 2 | `add` Command (Unified) | 11 | 11 | 100% |
-| Phase 3 | Built-in Tools | 8 | 14 | 57% |
+| Phase 3 | Built-in Tools | 9 | 14 | 64% |
 | Phase 4 | Claude Code Plugin | 0 | 5 | 0% |
 | Phase 5 | Publish | 0 | 3 | 0% |
 | Backlog | Future Enhancements | 0 | 5 | 0% |
@@ -71,7 +71,7 @@
 ### Scaffoldable Tools (kind: none)
 - [x] P3-07 `nextjs` tool: scaffoldable → `apps/`, `lang: typescript`, auto-links prettier + eslint/nextjs + tsconfig/nextjs, moon tasks: dev + build + start
 - [x] P3-08 `vitest` tool: shareable, moon tasks: `test` + `test-watch`
-- [ ] P3-09 `tsup` tool: shareable, moon task: `build`
+- [x] P3-09 `tsup` tool: shareable, moon task: `build`
 - [ ] P3-10 `tailwind` tool: shareable, PostCSS integration
 - [ ] P3-11 `shadcn` tool: scaffoldable → `packages/`, integration handlers for nextjs + expo
 - [ ] P3-12 `commitlint` tool: `kind: root`, git hook via lefthook

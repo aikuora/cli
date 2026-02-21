@@ -10,10 +10,26 @@ workspace:
       - "vitest.explorer"
   moon:
     file: typescript
+    fileGroups:
+      sources:
+        - 'src/**/*.ts'
+        - 'src/**/*.tsx'
+        - 'src/**/*.js'
+        - 'src/**/*.jsx'
+      tests:
+        - 'src/**/*.test.ts'
+        - 'src/**/*.test.tsx'
+        - 'src/**/*.spec.ts'
+        - 'src/**/*.spec.tsx'
+        - 'tests/**/*.ts'
+        - 'tests/**/*.tsx'
     tasks:
       - name: test
         command: vitest
         args: ['run']
+        inputs:
+          - '@group(sources)'
+          - '@group(tests)'
         options:
           cache: false
       - name: test-watch

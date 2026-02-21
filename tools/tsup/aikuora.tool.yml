@@ -7,13 +7,23 @@ requires:
 workspace:
   moon:
     file: typescript
+    fileGroups:
+      sources:
+        - "src/**/*.ts"
+        - "src/**/*.tsx"
     tasks:
       - name: build
         command: tsup
+        inputs:
+          - "@group(sources)"
+        outputs:
+          - "dist"
         options:
           cache: true
   gitignore:
     - dist
+    - build
+    - out
 
 link:
   dependency: true

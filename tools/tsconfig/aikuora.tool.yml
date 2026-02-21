@@ -15,12 +15,16 @@ workspace:
       typescript.updateImportsOnFileMove.enabled: "always"
   moon:
     file: typescript
+    fileGroups:
+      sources:
+        - 'src/**/*.ts'
+        - 'src/**/*.tsx'
     tasks:
       - name: typecheck
         command: tsc
         args: ['--noEmit']
         inputs:
-          - 'src/**/*'
+          - '@group(sources)'
           - 'tsconfig.json'
 
 link:

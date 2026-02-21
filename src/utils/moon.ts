@@ -12,6 +12,7 @@ type MoonTaskEntry = {
   command: string;
   args?: string[];
   inputs?: string[];
+  outputs?: string[];
   options?: Record<string, unknown>;
 };
 
@@ -30,6 +31,7 @@ export function buildMoonConfig(tasks: MoonTask[], language?: string, tags?: str
     const entry: MoonTaskEntry = { command: task.command };
     if (task.args && task.args.length > 0) entry.args = task.args;
     if (task.inputs && task.inputs.length > 0) entry.inputs = task.inputs;
+    if (task.outputs && task.outputs.length > 0) entry.outputs = task.outputs;
     if (task.options) entry.options = task.options as Record<string, unknown>;
     taskEntries[task.name] = entry;
   }
@@ -74,6 +76,7 @@ export async function addMoonTask(filePath: string, task: MoonTask): Promise<voi
   const entry: MoonTaskEntry = { command: task.command };
   if (task.args && task.args.length > 0) entry.args = task.args;
   if (task.inputs && task.inputs.length > 0) entry.inputs = task.inputs;
+  if (task.outputs && task.outputs.length > 0) entry.outputs = task.outputs;
   if (task.options) entry.options = task.options as Record<string, unknown>;
 
   config.tasks[task.name] = entry;
@@ -136,6 +139,7 @@ export async function addInheritedMoonTasks(
 
   type MoonTasksFile = {
     '$schema'?: string;
+    fileGroups?: Record<string, string[]>;
     tasks?: Record<string, MoonTaskEntry>;
   };
 
@@ -146,6 +150,14 @@ export async function addInheritedMoonTasks(
     existing = (parse(raw) as MoonTasksFile) ?? {};
   }
 
+  // Merge fileGroups — union of patterns per group, deduplicated
+  const fileGroups: Record<string, string[]> = existing.fileGroups ?? {};
+  for (const [groupName, patterns] of Object.entries(inheritance.fileGroups ?? {})) {
+    const existing_patterns = fileGroups[groupName] ?? [];
+    const merged = Array.from(new Set([...existing_patterns, ...patterns]));
+    fileGroups[groupName] = merged;
+  }
+
   // Merge tasks — skip any that already exist (idempotent)
   const tasks: Record<string, MoonTaskEntry> = existing.tasks ?? {};
 
@@ -154,13 +166,15 @@ export async function addInheritedMoonTasks(
     const entry: MoonTaskEntry = { command: task.command };
     if (task.args && task.args.length > 0) entry.args = task.args;
     if (task.inputs && task.inputs.length > 0) entry.inputs = task.inputs;
+    if (task.outputs && task.outputs.length > 0) entry.outputs = task.outputs;
     if (task.options) entry.options = task.options as Record<string, unknown>;
     tasks[task.name] = entry;
   }
 
-  // Stable key order: $schema → tasks
+  // Stable key order: $schema → fileGroups → tasks
   const finalConfig: MoonTasksFile = {
     '$schema': MOON_TASKS_SCHEMA,
+    ...(Object.keys(fileGroups).length > 0 && { fileGroups }),
     tasks,
   };
 

@@ -29,6 +29,27 @@ workspace:
                 [[ "$FILE" =~ \.(js|jsx|ts|tsx|mjs|cjs|json|md|css|scss|yaml|yml)$ ]] && pnpm exec prettier --write "$FILE" || true
   moon:
     file: typescript
+    fileGroups:
+      sources:
+        - 'src/**/*.ts'
+        - 'src/**/*.tsx'
+        - 'src/**/*.js'
+        - 'src/**/*.jsx'
+      tests:
+        - 'src/**/*.test.ts'
+        - 'src/**/*.test.tsx'
+        - 'src/**/*.spec.ts'
+        - 'src/**/*.spec.tsx'
+        - 'tests/**/*.ts'
+        - 'tests/**/*.tsx'
+      configs:
+        - '*.config.ts'
+        - '*.config.mjs'
+        - '*.json'
+        - '*.md'
+        - '*.css'
+        - '*.yaml'
+        - '*.yml'
     tasks:
       - name: format
         command: prettier
@@ -38,6 +59,10 @@ workspace:
       - name: format-check
         command: prettier
         args: ['--check', '.']
+        inputs:
+          - '@group(sources)'
+          - '@group(tests)'
+          - '@group(configs)'
 
 link:
   dependency: true

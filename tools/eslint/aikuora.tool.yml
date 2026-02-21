@@ -25,10 +25,31 @@ workspace:
                 [[ "$FILE" =~ \.(js|jsx|ts|tsx)$ ]] && pnpm exec eslint --fix "$FILE" || true
   moon:
     file: typescript
+    fileGroups:
+      sources:
+        - 'src/**/*.ts'
+        - 'src/**/*.tsx'
+        - 'src/**/*.js'
+        - 'src/**/*.jsx'
+      tests:
+        - 'src/**/*.test.ts'
+        - 'src/**/*.test.tsx'
+        - 'src/**/*.spec.ts'
+        - 'src/**/*.spec.tsx'
+        - 'tests/**/*.ts'
+        - 'tests/**/*.tsx'
+      configs:
+        - 'eslint.config.mjs'
+        - '*.config.ts'
+        - '*.config.mjs'
     tasks:
       - name: lint
         command: eslint
         args: ['.']
+        inputs:
+          - '@group(sources)'
+          - '@group(tests)'
+          - '@group(configs)'
         options:
           cache: true
       - name: lint-fix

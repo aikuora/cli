@@ -2,6 +2,10 @@ name: nextjs
 kind: none
 lang: typescript
 
+workspace:
+  gitignore:
+    - .next
+
 scaffold:
   type: app
   cssEntry: src/app/globals.css

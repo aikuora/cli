@@ -1,7 +1,7 @@
 name: moon
 kind: root
 installer: proto
-version: 2.0.0-rc.4
+version: latest
 
 workspace:
   gitignore:

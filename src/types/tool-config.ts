@@ -14,6 +14,8 @@ export const moonTaskSchema = z.object({
   args: z.array(z.string()).optional(),
   /** Files/globs that trigger this task when changed (Moon's `inputs` field). */
   inputs: z.array(z.string()).optional(),
+  /** Files/dirs produced by this task (Moon's `outputs` field, enables caching). */
+  outputs: z.array(z.string()).optional(),
   options: moonTaskOptionsSchema.optional(),
 });
 
@@ -106,6 +108,12 @@ export const workspaceConfigSchema = z.object({
     .object({
       /** Target filename without extension, e.g. "typescript" → `.moon/tasks/typescript.yml` */
       file: z.string(),
+      /**
+       * Named file groups to merge into `.moon/tasks/<file>.yml`.
+       * Each key is a group name; the value is a list of globs/paths.
+       * Groups from multiple tools are merged (patterns deduplicated).
+       */
+      fileGroups: z.record(z.array(z.string())).optional(),
       tasks: z.array(moonTaskSchema),
     })
     .optional(),

@@ -138,6 +138,105 @@ async function ensureRequiredTools(requires: string[], baseOptions: AddOptions):
 }
 
 // ---------------------------------------------------------------------------
+// tsconfig / CSS helpers (used when wiring workspace packages)
+// ---------------------------------------------------------------------------
+
+/**
+ * Patch a tsconfig.json to add path aliases pointing to a package's own src/.
+ * Used for the package itself (self-referential aliases).
+ * Idempotent: skips if the key already exists.
+ */
+async function patchTsconfigPaths(
+  tsconfigPath: string,
+  scopedName: string,
+  srcBase: string
+): Promise<void> {
+  if (!existsSync(tsconfigPath)) return;
+  const tsconfig = JSON.parse(readFileSync(tsconfigPath, 'utf-8')) as Record<string, unknown>;
+  const co = (tsconfig.compilerOptions as Record<string, unknown>) ?? {};
+  const paths = (co.paths as Record<string, string[]>) ?? {};
+  const key = `${scopedName}/*`;
+  if (key in paths) return;
+  paths[key] = [`${srcBase}/*`];
+  co.paths = paths;
+  tsconfig.compilerOptions = co;
+  await writeFile(tsconfigPath, JSON.stringify(tsconfig, null, 2) + '\n', 'utf-8');
+}
+
+/**
+ * Patch a tsconfig.json to add a TypeScript project reference.
+ * Used by consumer apps to reference workspace packages.
+ * Idempotent: skips if the reference path already exists.
+ */
+async function patchTsconfigReferences(tsconfigPath: string, refPath: string): Promise<void> {
+  if (!existsSync(tsconfigPath)) return;
+  const tsconfig = JSON.parse(readFileSync(tsconfigPath, 'utf-8')) as Record<string, unknown>;
+  const refs = (tsconfig.references as Array<{ path: string }>) ?? [];
+  if (refs.some((r) => r.path === refPath)) return;
+  refs.push({ path: refPath });
+  tsconfig.references = refs;
+  await writeFile(tsconfigPath, JSON.stringify(tsconfig, null, 2) + '\n', 'utf-8');
+}
+
+/**
+ * Inject `@import "<scopedName>/globals.css"` into a CSS file, right after the
+ * first existing @import line. Idempotent: no-op if already present.
+ */
+async function injectCssImport(cssPath: string, scopedName: string): Promise<void> {
+  if (!existsSync(cssPath)) return;
+  let css = readFileSync(cssPath, 'utf-8');
+  const importLine = `@import "${scopedName}/globals.css";`;
+  if (css.includes(importLine)) return;
+  // Insert after the first @import line (e.g. @import "tailwindcss")
+  css = css.replace(/(@import ['"][^'"]+['"];?\n)/, `$1${importLine}\n`);
+  await writeFile(cssPath, css, 'utf-8');
+}
+
+// ---------------------------------------------------------------------------
+// Workspace package helper (used by scaffold.packages)
+// ---------------------------------------------------------------------------
+
+/**
+ * Ensure a workspace package exists for the given scaffold tool.
+ * If the package directory does not exist yet, scaffolds it first.
+ * Returns the scoped package name to add as a workspace dependency.
+ */
+async function ensureWorkspacePackage(
+  pkgToolName: string,
+  baseOptions: AddOptions,
+  projectRoot: string,
+  rootConfig: Config
+): Promise<{ success: boolean; scopedName: string }> {
+  const tools = scanAllTools(projectRoot, rootConfig.customTools);
+  const discovered = resolveTool(pkgToolName, tools);
+  if (!discovered) return { success: false, scopedName: '' };
+
+  const loaderResult = loadToolConfig(discovered.path);
+  if (!loaderResult.success || !loaderResult.data?.scaffold) {
+    return { success: false, scopedName: '' };
+  }
+
+  const pkgScaffold = loaderResult.data.scaffold;
+  const typeDir =
+    pkgScaffold.type === 'package'
+      ? rootConfig.structure.packages
+      : rootConfig.structure.modules;
+
+  const targetDir = join(projectRoot, typeDir, pkgToolName);
+  const scope = rootConfig.project.scope;
+  const scopedName = scope ? `${scope}/${pkgToolName}` : pkgToolName;
+
+  if (!existsSync(targetDir)) {
+    await runScaffold({ ...baseOptions, toolName: pkgToolName, name: pkgToolName });
+  }
+
+  // Add self-referential paths so the package can use its own scoped name as imports
+  await patchTsconfigPaths(join(targetDir, 'tsconfig.json'), scopedName, './src');
+
+  return { success: true, scopedName };
+}
+
+// ---------------------------------------------------------------------------
 // Mode A: Scaffold
 // ---------------------------------------------------------------------------
 
@@ -216,8 +315,14 @@ async function runScaffold(options: AddOptions) {
     await renderAndCopy(templateDir, targetDir, templateContext);
   }
 
-  const moonConfig = buildMoonConfig(scaffold.moonTasks, toolConfig.lang ?? undefined);
+  const moonConfig = buildMoonConfig(scaffold.moonTasks, toolConfig.lang ?? undefined, scaffold.tags);
   await writeMoonYml(join(targetDir, 'moon.yml'), moonConfig);
+
+  // Apply workspace-level integrations declared by the scaffold tool itself
+  // (e.g. ui writes .moon/tasks/shadcn.yml via workspace.moon)
+  if (toolConfig.workspace) {
+    await applyWorkspaceSettings(projectRoot, toolConfig.workspace, toolName);
+  }
 
   if (Object.keys(toolConfig.prototools).length > 0) {
     await updatePrototools(join(projectRoot, '.prototools'), toolConfig.prototools);
@@ -241,12 +346,70 @@ async function runScaffold(options: AddOptions) {
     }
   }
 
-  // Write aikuora.project.yml
+  // Auto-scaffold workspace packages and wire them as dependencies
+  const packagedTools: string[] = [];
+  for (const pkgToolName of scaffold.packages ?? []) {
+    const pkgResult = await ensureWorkspacePackage(pkgToolName, options, projectRoot, rootConfig);
+    if (pkgResult.success) {
+      packagedTools.push(pkgToolName);
+
+      // Add as runtime dependency in package.json
+      const targetPkgPath = join(targetDir, 'package.json');
+      if (existsSync(targetPkgPath)) {
+        const targetPkg = JSON.parse(readFileSync(targetPkgPath, 'utf-8')) as Record<string, unknown>;
+        const deps = (targetPkg.dependencies as Record<string, string>) ?? {};
+        if (!(pkgResult.scopedName in deps)) {
+          deps[pkgResult.scopedName] = 'workspace:*';
+          targetPkg.dependencies = sortDeps(deps);
+          await writeFile(targetPkgPath, JSON.stringify(targetPkg, null, 2) + '\n', 'utf-8');
+        }
+      }
+
+      // Add a TypeScript project reference so the app can consume the workspace package
+      const refPath = `../../${rootConfig.structure.packages}/${pkgToolName}`;
+      await patchTsconfigReferences(join(targetDir, 'tsconfig.json'), refPath);
+
+      // Inject CSS import if the app declares a cssEntry and the package exports a globals.css
+      if (scaffold.cssEntry) {
+        const pkgGlobalsPath = join(
+          projectRoot,
+          rootConfig.structure.packages,
+          pkgToolName,
+          'src', 'styles', 'globals.css'
+        );
+        if (existsSync(pkgGlobalsPath)) {
+          await injectCssImport(join(targetDir, scaffold.cssEntry), pkgResult.scopedName);
+        }
+      }
+    }
+  }
+
+  // Write aikuora.project.yml — must happen before integration handlers,
+  // which read this file to resolve the target tool name.
   await writeProjectFile(targetDir, {
     tool: toolName,
     type: scaffold.type,
-    dependencies: { tools: linkedTools, projects: [] },
+    dependencies: { tools: linkedTools, projects: packagedTools },
   });
+
+  // Invoke integration handlers for each wired workspace package.
+  // Both aikuora.project.yml files now exist so invokeIntegrationHandler can resolve them.
+  for (const pkgToolName of packagedTools) {
+    const pkgAbsPath = join(projectRoot, rootConfig.structure.packages, pkgToolName);
+    const pkgRelPath = `${rootConfig.structure.packages}/${pkgToolName}`;
+    const pkgScopedName = rootConfig.project.scope
+      ? `${rootConfig.project.scope}/${pkgToolName}`
+      : pkgToolName;
+    await invokeIntegrationHandler({
+      sourceDir: pkgAbsPath,
+      targetDir,
+      sourceName: pkgRelPath,
+      scopedName: pkgScopedName,
+      tools,
+      workspaceRoot: projectRoot,
+      scope: rootConfig.project.scope,
+    });
+  }
 
   const moonTasksCreated = scaffold.moonTasks.map((t: MoonTask) => t.name);
 
@@ -258,6 +421,7 @@ async function runScaffold(options: AddOptions) {
     name: appName,
     path: join(typeDir, appName!),
     linkedTools,
+    packagedTools,
     prototoolsUpdated: Object.keys(toolConfig.prototools).length > 0,
     moonTasksCreated,
   };
@@ -377,6 +541,7 @@ async function mergeClaudeHooks(
   await writeFile(filePath, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
 }
 
+import type { Config } from '../types/config.js';
 import type { WorkspaceConfig } from '../types/tool-config.js';
 
 async function mergeVscodeExtensions(filePath: string, extensions: string[]): Promise<void> {

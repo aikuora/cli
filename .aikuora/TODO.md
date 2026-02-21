@@ -7,7 +7,7 @@
 | Phase 0 | Project Setup & Core Infrastructure | 7    | 7     | 100%     |
 | Phase 1 | CLI Core + Scanner                  | 7    | 7     | 100%     |
 | Phase 2 | `add` Command (Unified)             | 11   | 11    | 100%     |
-| Phase 3 | Built-in Tools                      | 10   | 14    | 71%      |
+| Phase 3 | Built-in Tools                      | 11   | 14    | 79%      |
 | Phase 4 | Claude Code Plugin                  | 0    | 5     | 0%       |
 | Phase 5 | Publish                             | 0    | 3     | 0%       |
 | Backlog | Future Enhancements                 | 0    | 5     | 0%       |
@@ -76,7 +76,7 @@
 - [x] P3-08 `vitest` tool: shareable, moon tasks: `test` + `test-watch`
 - [x] P3-09 `tsup` tool: shareable, moon task: `build`
 - [x] P3-10 `tailwind` tool: shareable, PostCSS integration
-- [ ] P3-11 `shadcn` tool: scaffoldable → `packages/`, integration handlers for nextjs + expo
+- [x] P3-11 `shadcn` tool: scaffoldable → `packages/`, integration handlers for nextjs + expo
 - [ ] P3-12 `commitlint` tool: `kind: root`, git hook via lefthook
 - [ ] P3-13 `lefthook` tool: `kind: root`, writes `lefthook.yml` at workspace root
 - [ ] P3-14 `release-please` tool: `kind: root`

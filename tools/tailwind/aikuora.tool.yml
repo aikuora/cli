@@ -8,6 +8,8 @@ workspace:
   vscode:
     extensions:
       - "bradlc.vscode-tailwindcss"
+    settings:
+      css.lint.unknownAtRules: ignore
 
 link:
   dependency: true

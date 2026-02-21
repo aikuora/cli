@@ -1,5 +1,68 @@
 # Session Log
 
+## Session 2026-02-21
+
+### Completed
+
+- [P3-11]: `ui` scaffold tool implemented — `kind: none`, `scaffold.type: package`, `scaffold.tags: [shadcn]`; devtools: prettier, tailwind, eslint/typescript, tsconfig/react; moon workspace writes `.moon/tasks/shadcn.yml` with `add` task; declarative patches for nextjs dependent
+
+### In Progress
+
+- [P3-12]: `commitlint` tool — not started
+- [P3-13]: `lefthook` tool — not started
+- [P3-14]: `release-please` tool — not started
+- [P3-15]: `sync` command — not started
+- [P3-16]: `info` command — not started
+- [P3-17]: `list` command — not started
+
+### Decisions Made
+
+- `ui` tool uses `kind: none` (scaffold-only), not `kind: shareable` — it produces a package, not a shared config
+- `components.json` uses style `radix-nova` (valid per shadcn schema) with `rsc: true` and full alias set
+- `package.json.hbs` removes `@turbo/gen`, `typescript`, `zod`; react is a `peerDependency` only
+- New `scaffold.packages` field on a tool causes the CLI to scaffold dependency packages (e.g. `packages/ui`) before writing the app, and injects workspace references automatically
+- New `scaffold.tags` field on scaffold config (added to `scaffoldConfigSchema`) passed through to `buildMoonConfig` for Moon tag support
+- New `scaffold.cssEntry` field on scaffold config identifies the CSS entry file in an app for css import injection
+- Declarative patch engine replaces JS integration handlers for common ops — `insertAfter`, `replace`, `wrapJsx` with Handlebars templating and optional `format: true` (runs prettier silently)
+- `dependentEntry` is now a union: `string` (legacy JS handler path) | object (declarative patches array) — backward compatible
+- `tsconfig/react` variant added with JSX + DOM lib support
+- `tailwind` tool: `css.lint.unknownAtRules: ignore` added to VS Code settings to suppress false positives from Tailwind v4 at-rules
+
+### Blockers
+
+- None
+
+### Files Modified
+
+- `tools/ui/aikuora.tool.yml` — new tool file (created)
+- `tools/ui/template/components.json` — shadcn config template (created)
+- `tools/ui/template/package.json.hbs` — package.json template for packages/ui (created)
+- `tools/ui/template/src/globals.css` — CSS entry with @source paths (created)
+- `tools/nextjs/aikuora.tool.yml` — added `scaffold.packages: [ui]`, `scaffold.cssEntry`, declarative `dependents.ui` patches
+- `tools/tsconfig/aikuora.tool.yml` — new `react` variant with JSX + DOM
+- `tools/tailwind/aikuora.tool.yml` — added `css.lint.unknownAtRules: ignore` to vscode settings
+- `src/types/tool-config.ts` — added `insertAfterOp`, `replaceOp`, `wrapJsxOp`, `filePatch`, `dependentEntry` schemas; added `scaffold.tags`, `scaffold.cssEntry` to `scaffoldConfigSchema`
+- `src/utils/integration.ts` — added `applyDeclarativePatches`, `applyPatchOp`, `renderJsxProps`, `runPrettier`
+- `src/utils/moon.ts` — `buildMoonConfig` accepts optional `tags?` parameter
+- `src/commands/add.tsx` — `ensureWorkspacePackage` scaffolds `packages/ui` if missing; injects workspace dep + tsconfig reference + css import; invokes integration handler after `writeProjectFile`
+
+### Next Session Should
+
+1. Implement `commitlint` (P3-12) + `lefthook` (P3-13) as a coupled pair — commitlint depends on lefthook for the git hook; start with lefthook tool then add commitlint dependent
+2. Implement `release-please` (P3-14) — `kind: root`, GitHub Actions workflow file
+3. Implement `sync` command (P3-15) — verify `.prototools`, `workspace.yml`, `pnpm-workspace.yaml`, and tool link consistency
+4. Implement `info` (P3-16) and `list` (P3-17) commands — JSON output for all apps/packages/modules/tools/runtimes, and grouped tool listing
+
+### Context for Resuming
+
+- Phase 3 is at 79% (11/14); remaining: commitlint, lefthook, release-please + 3 commands
+- The declarative patch engine is in `src/utils/integration.ts` — `applyDeclarativePatches(patches, projectDir, ctx)` is the entry point; ops are `insertAfter | replace | wrapJsx`
+- `scaffold.packages` in a tool's YAML causes `ensureWorkspacePackage` to run before the main scaffold; it scaffolds sub-packages and wires tsconfig references + workspace deps automatically
+- `dependentEntry` in YAML is now string | object — object shape is `{ patches: FilePatch[] }` where each patch is `{ file, ops: PatchOp[] }`
+- All changes compile without TypeScript errors
+
+---
+
 ## Session 2026-02-19
 
 ### Completed

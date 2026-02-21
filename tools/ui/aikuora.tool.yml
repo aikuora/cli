@@ -1,0 +1,53 @@
+name: ui
+kind: none
+lang: typescript
+requires:
+  - pnpm
+
+dependents:
+  nextjs:
+    patches:
+      - file: src/app/layout.tsx
+        idempotentIf: ThemeProvider
+        format: true
+        ops:
+          - type: insertAfter
+            after: "./globals.css"
+            content: "import { ThemeProvider } from '{{scopedName}}/components/theme-provider';"
+          - type: replace
+            from: '<html lang="en">'
+            to: '<html lang="en" suppressHydrationWarning>'
+          - type: wrapJsx
+            target: "{children}"
+            component: ThemeProvider
+            props:
+              attribute: class
+              defaultTheme: system
+              enableSystem: true
+              disableTransitionOnChange: true
+
+workspace:
+  moon:
+    file: shadcn
+    tasks:
+      - name: add
+        command: bash
+        args:
+          - '-c'
+          - 'pnpm dlx shadcn@latest add "$@" && moon run :format'
+          - '--'
+        options:
+          cache: false
+
+scaffold:
+  type: package
+  tags:
+    - shadcn
+  devtools:
+    - prettier
+    - tailwind
+    - tool: eslint
+      variant: typescript
+    - tool: tsconfig
+      variant: react
+  moonTasks: []

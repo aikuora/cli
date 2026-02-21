@@ -41,6 +41,26 @@ export const devtoolEntrySchema = z.union([
 export const scaffoldConfigSchema = z.object({
   type: z.enum(['app', 'package', 'module']),
   devtools: z.array(devtoolEntrySchema),
+  /**
+   * Scaffold tools that create standalone workspace packages (e.g. packages/ui).
+   * For each entry the CLI will:
+   *   1. Scaffold the package if it does not already exist.
+   *   2. Add it as a `workspace:*` dependency to the current scaffold target.
+   * Unlike devtools (which run in link mode), these are full scaffold operations.
+   */
+  packages: z.array(z.string()).optional(),
+  /**
+   * Moon project tags written to moon.yml.
+   * Projects tagged with a name inherit tasks from `.moon/tasks/<name>.yml`.
+   * e.g. `tags: [shadcn]` → inherits `.moon/tasks/shadcn.yml`
+   */
+  tags: z.array(z.string()).optional(),
+  /**
+   * Relative path (from the scaffold root) to the main CSS entry file.
+   * When workspace packages are wired in, their CSS exports are injected here.
+   * e.g. `cssEntry: src/app/globals.css` for a Next.js app.
+   */
+  cssEntry: z.string().optional(),
   moonTasks: z.array(moonTaskSchema),
 });
 
@@ -96,6 +116,67 @@ export const workspaceConfigSchema = z.object({
   gitignore: z.array(z.string()).optional(),
 });
 
+// ---------------------------------------------------------------------------
+// Declarative integration patches (used in dependents map)
+// ---------------------------------------------------------------------------
+
+export const insertAfterOpSchema = z.object({
+  type: z.literal('insertAfter'),
+  /** Find the first line that contains this string and insert content after it. */
+  after: z.string(),
+  /** Line to insert. Handlebars template — receives source context vars (scopedName, name, path). */
+  content: z.string(),
+});
+
+export const replaceOpSchema = z.object({
+  type: z.literal('replace'),
+  /** Literal string to find in the file. */
+  from: z.string(),
+  /** Replacement string. Handlebars template. */
+  to: z.string(),
+});
+
+export const wrapJsxOpSchema = z.object({
+  type: z.literal('wrapJsx'),
+  /** JSX expression to wrap, e.g. '{children}'. Treated as a literal string match. */
+  target: z.string(),
+  /** Component name to wrap with, e.g. 'ThemeProvider'. */
+  component: z.string(),
+  /**
+   * Component props.
+   * - string value  → propName="value"
+   * - boolean true  → propName  (JSX shorthand)
+   * - boolean false → propName={false}
+   */
+  props: z.record(z.union([z.string(), z.boolean()])).optional(),
+});
+
+export const patchOpSchema = z.discriminatedUnion('type', [
+  insertAfterOpSchema,
+  replaceOpSchema,
+  wrapJsxOpSchema,
+]);
+
+export const filePatchSchema = z.object({
+  /** Path relative to the target project root (e.g. 'src/app/layout.tsx'). */
+  file: z.string(),
+  /** Skip all ops for this file if it already contains this string (idempotency guard). */
+  idempotentIf: z.string().optional(),
+  /** Run `pnpm exec prettier --write` on the file after all ops are applied. */
+  format: z.boolean().optional(),
+  ops: z.array(patchOpSchema),
+});
+
+/**
+ * Value type for entries in the `dependents` map.
+ * - string  → path to a compiled JS handler (escape hatch for complex logic)
+ * - object  → declarative patch list applied by the CLI patch engine
+ */
+export const dependentEntrySchema = z.union([
+  z.string(),
+  z.object({ patches: z.array(filePatchSchema) }),
+]);
+
 export const toolConfigSchema = z.object({
   name: z.string(),
   /**
@@ -125,11 +206,13 @@ export const toolConfigSchema = z.object({
   runtime: z.enum(['node', 'python']).optional(),
   prototools: z.record(z.string()).default({}),
   /**
-   * Maps scaffold tool names to integration handler file paths (relative to dependents/).
-   * Used when a project declares this package as a dependency in aikuora.project.yml.
-   * e.g. `{ nextjs: "nextjs.ts", expo: "expo.ts" }`
+   * Per-tool integration handlers, keyed by the consuming scaffold tool name.
+   * Each entry is either:
+   *   - a string  → path to a compiled JS handler file under dependents/
+   *   - an object → declarative patch list run by the CLI patch engine
+   * e.g. `{ nextjs: { patches: [...] }, expo: "expo.js" }`
    */
-  dependents: z.record(z.string()).optional(),
+  dependents: z.record(dependentEntrySchema).optional(),
   /**
    * Workspace-level integrations applied when this tool is installed.
    * Covers VSCode settings/extensions, Claude Code hooks, and Moon task inheritance.
@@ -142,6 +225,12 @@ export const toolConfigSchema = z.object({
 /**
  * TypeScript types
  */
+export type InsertAfterOp = z.infer<typeof insertAfterOpSchema>;
+export type ReplaceOp = z.infer<typeof replaceOpSchema>;
+export type WrapJsxOp = z.infer<typeof wrapJsxOpSchema>;
+export type PatchOp = z.infer<typeof patchOpSchema>;
+export type FilePatch = z.infer<typeof filePatchSchema>;
+export type DependentEntry = z.infer<typeof dependentEntrySchema>;
 export type MoonTaskOptions = z.infer<typeof moonTaskOptionsSchema>;
 export type MoonTask = z.infer<typeof moonTaskSchema>;
 export type LinkVariant = z.infer<typeof linkVariantSchema>;

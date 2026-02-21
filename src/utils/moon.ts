@@ -23,7 +23,7 @@ const MOON_TASKS_SCHEMA = 'https://moonrepo.dev/schemas/v2/tasks.json';
  * Includes `$schema` and optional `language` for Moon's automatic task inheritance
  * (projects with `language: typescript` inherit `.moon/tasks/typescript.yml`).
  */
-export function buildMoonConfig(tasks: MoonTask[], language?: string): object {
+export function buildMoonConfig(tasks: MoonTask[], language?: string, tags?: string[]): object {
   const taskEntries: Record<string, MoonTaskEntry> = {};
 
   for (const task of tasks) {
@@ -36,6 +36,7 @@ export function buildMoonConfig(tasks: MoonTask[], language?: string): object {
 
   const config: Record<string, unknown> = { '$schema': MOON_PROJECT_SCHEMA };
   if (language) config.language = language;
+  if (tags && tags.length > 0) config.tags = tags;
   config.tasks = taskEntries;
 
   return config;

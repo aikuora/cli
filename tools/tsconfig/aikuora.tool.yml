@@ -34,6 +34,19 @@ link:
   variants:
     - name: typescript
       default: true
+    - name: react
+      forTools:
+        - ui
+      content: |
+        {
+          "$schema": "https://json.schemastore.org/tsconfig",
+          "extends": "{{packageName}}/lib.json",
+          "compilerOptions": {
+            "jsx": "react-jsx",
+            "lib": ["ESNext", "DOM", "DOM.Iterable"]
+          },
+          "include": ["src/**/*.ts", "src/**/*.tsx"]
+        }
     - name: nextjs
       forTools:
         - nextjs

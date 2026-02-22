@@ -35,6 +35,3 @@ coverage/
 # Test files
 test-*.yaml
 test-output.*
-
-# Migration backup (orchestrator — not committed)
-.claude/migration-backup/

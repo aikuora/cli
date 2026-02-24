@@ -17,7 +17,9 @@
       "Bash(pnpm lint:*)",
       "WebFetch(domain:pnpm.io)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "WebFetch(domain:ui.shadcn.com)"
+      "WebFetch(domain:ui.shadcn.com)",
+      "Bash(npx tsc:*)",
+      "Bash(npm test:*)"
     ]
   }
 }

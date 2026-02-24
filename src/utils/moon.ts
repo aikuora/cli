@@ -20,6 +20,19 @@ const MOON_PROJECT_SCHEMA = 'https://moonrepo.dev/schemas/v2/project.json';
 const MOON_TASKS_SCHEMA = 'https://moonrepo.dev/schemas/v2/tasks.json';
 
 /**
+ * Convert a MoonTask to a MoonTaskEntry for use in moon.yml files.
+ * Conditionally includes args, inputs, outputs, and options when present.
+ */
+function taskToEntry(task: MoonTask): MoonTaskEntry {
+  const entry: MoonTaskEntry = { command: task.command };
+  if (task.args && task.args.length > 0) entry.args = task.args;
+  if (task.inputs && task.inputs.length > 0) entry.inputs = task.inputs;
+  if (task.outputs && task.outputs.length > 0) entry.outputs = task.outputs;
+  if (task.options) entry.options = task.options as Record<string, unknown>;
+  return entry;
+}
+
+/**
  * Build a project moon.yml data structure from a list of tasks.
  * Includes `$schema` and optional `language` for Moon's automatic task inheritance
  * (projects with `language: typescript` inherit `.moon/tasks/typescript.yml`).
@@ -28,12 +41,7 @@ export function buildMoonConfig(tasks: MoonTask[], language?: string, tags?: str
   const taskEntries: Record<string, MoonTaskEntry> = {};
 
   for (const task of tasks) {
-    const entry: MoonTaskEntry = { command: task.command };
-    if (task.args && task.args.length > 0) entry.args = task.args;
-    if (task.inputs && task.inputs.length > 0) entry.inputs = task.inputs;
-    if (task.outputs && task.outputs.length > 0) entry.outputs = task.outputs;
-    if (task.options) entry.options = task.options as Record<string, unknown>;
-    taskEntries[task.name] = entry;
+    taskEntries[task.name] = taskToEntry(task);
   }
 
   const config: Record<string, unknown> = { '$schema': MOON_PROJECT_SCHEMA };
@@ -73,13 +81,7 @@ export async function addMoonTask(filePath: string, task: MoonTask): Promise<voi
     return;
   }
 
-  const entry: MoonTaskEntry = { command: task.command };
-  if (task.args && task.args.length > 0) entry.args = task.args;
-  if (task.inputs && task.inputs.length > 0) entry.inputs = task.inputs;
-  if (task.outputs && task.outputs.length > 0) entry.outputs = task.outputs;
-  if (task.options) entry.options = task.options as Record<string, unknown>;
-
-  config.tasks[task.name] = entry;
+  config.tasks[task.name] = taskToEntry(task);
 
   await writeMoonYml(filePath, config);
 }
@@ -163,12 +165,7 @@ export async function addInheritedMoonTasks(
 
   for (const task of inheritance.tasks) {
     if (tasks[task.name]) continue;
-    const entry: MoonTaskEntry = { command: task.command };
-    if (task.args && task.args.length > 0) entry.args = task.args;
-    if (task.inputs && task.inputs.length > 0) entry.inputs = task.inputs;
-    if (task.outputs && task.outputs.length > 0) entry.outputs = task.outputs;
-    if (task.options) entry.options = task.options as Record<string, unknown>;
-    tasks[task.name] = entry;
+    tasks[task.name] = taskToEntry(task);
   }
 
   // Stable key order: $schema → fileGroups → tasks

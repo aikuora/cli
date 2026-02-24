@@ -103,7 +103,7 @@ export function scanCustomTools(customPaths: string[]): ToolMap {
     }
 
     // Get the tool name from the directory name
-    const toolName = dirname(absolutePath).split('/').pop() || '';
+    const toolName = basename(absolutePath);
     const capabilities = detectCapabilities(absolutePath);
 
     if (capabilities.linkable || capabilities.scaffoldable) {

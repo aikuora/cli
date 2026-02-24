@@ -137,7 +137,7 @@ function App() {
     }
 
     // Determine mode for the Ink component (heuristic)
-    const mode: 'scaffold' | 'link' | 'local' | 'project' | 'install' = local
+    const mode: 'scaffold' | 'link' | 'local' | 'project' | 'root-or-shareable' = local
       ? 'local'
       : name
         ? 'scaffold'
@@ -145,7 +145,7 @@ function App() {
           ? toolName.includes('/')
             ? 'project'
             : 'link'
-          : 'install'; // no target, no name, no local → shareable/root install
+          : 'root-or-shareable'; // no target, no name, no local → shareable/root install
 
     addCommand({ toolName, target, name, variant, local, json })
       .then((result) => {

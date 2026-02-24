@@ -9,8 +9,10 @@ import { Text } from 'ink';
 import { loadToolConfig } from '../core/loader.js';
 import { resolveTool } from '../core/resolver.js';
 import { scanAllTools, scanBuiltInTools } from '../core/scanner.js';
+import type { DiscoveredTool } from '../types/tool.js';
 import { readConfig } from '../managers/config.js';
-import type { MoonTask } from '../types/tool-config.js';
+import type { Config } from '../types/config.js';
+import type { MoonTask, WorkspaceConfig } from '../types/tool-config.js';
 import { addInheritedMoonTasks, addMoonTask, buildMoonConfig, writeMoonYml } from '../utils/moon.js';
 import type { OutputOptions } from '../utils/output.js';
 import { output, outputError, outputSuccess } from '../utils/output.js';
@@ -27,11 +29,74 @@ export interface AddOptions extends OutputOptions {
   name?: string;
   /** Variant name for link mode */
   variant?: string;
-  /** Fork built-in to tools/ (requires customizable: true) */
+  /**
+   * Fork a built-in tool into the local tools/ directory.
+   * Note: currently also requires `customizable: true` in the tool config
+   * (see TODO below in runLocal — tracked for removal in P1-04).
+   */
   local?: boolean;
   cwd?: string;
   /** Suppress all output (used when running as a dependency via `requires`) */
   silent?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Private helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Read a JSON file and return its contents cast to T.
+ * Returns an empty object if the file does not exist.
+ */
+function readJsonFile<T extends Record<string, unknown>>(p: string): T {
+  if (!existsSync(p)) return {} as T;
+  return JSON.parse(readFileSync(p, 'utf-8')) as T;
+}
+
+/**
+ * Resolve a tool by name and load its config in one step.
+ * Returns `{ success: false }` (after emitting the appropriate error) when
+ * the tool cannot be found or its config cannot be loaded.
+ */
+async function loadResolvedTool(
+  toolName: string,
+  projectRoot: string,
+  customPaths: string[],
+  json: boolean | undefined,
+  mode: string,
+  silent?: boolean
+): Promise<
+  | { success: false }
+  | {
+      success: true;
+      discovered: DiscoveredTool;
+      toolConfig: NonNullable<ReturnType<typeof loadToolConfig>['data']>;
+      tools: ReturnType<typeof scanAllTools>;
+    }
+> {
+  const tools = scanAllTools(projectRoot, customPaths);
+  const discovered = resolveTool(toolName, tools);
+
+  if (!discovered) {
+    const err = `Tool '${toolName}' not found`;
+    if (!silent) {
+      if (json) output({ action: 'add', mode, success: false, error: err }, { json: json ?? false });
+      else outputError(err, { json: json ?? false });
+    }
+    return { success: false };
+  }
+
+  const loaderResult = loadToolConfig(discovered.path);
+  if (!loaderResult.success) {
+    const err = loaderResult.error?.message ?? 'Could not load tool config';
+    if (!silent) {
+      if (json) output({ action: 'add', mode, success: false, error: err }, { json: json ?? false });
+      else outputError(err, { json: json ?? false });
+    }
+    return { success: false };
+  }
+
+  return { success: true, discovered, toolConfig: loaderResult.data!, tools };
 }
 
 // ---------------------------------------------------------------------------
@@ -53,29 +118,17 @@ async function runRoot(options: AddOptions): Promise<{ success: boolean }> {
   }
 
   const rootConfig = configResult.data!;
-  const tools = scanAllTools(projectRoot, rootConfig.customTools);
-  const discovered = resolveTool(toolName, tools);
 
-  if (!discovered) {
-    const err = `Tool '${toolName}' not found`;
-    if (!silent) {
-      if (json) output({ action: 'add', mode: 'root', success: false, error: err }, { json });
-      else outputError(err, { json });
-    }
-    return { success: false };
-  }
-
-  const loaderResult = loadToolConfig(discovered.path);
-  if (!loaderResult.success) {
-    const err = loaderResult.error?.message ?? 'Could not load tool config';
-    if (!silent) {
-      if (json) output({ action: 'add', mode: 'root', success: false, error: err }, { json });
-      else outputError(err, { json });
-    }
-    return { success: false };
-  }
-
-  const toolConfig = loaderResult.data!;
+  const resolved = await loadResolvedTool(
+    toolName,
+    projectRoot,
+    rootConfig.customTools,
+    json,
+    'root',
+    silent
+  );
+  if (!resolved.success) return { success: false };
+  const { discovered, toolConfig } = resolved;
 
   if (toolConfig.kind !== 'root') {
     const err = `Tool '${toolName}' is not a root tool (kind: ${toolConfig.kind})`;
@@ -152,7 +205,7 @@ async function patchTsconfigPaths(
   srcBase: string
 ): Promise<void> {
   if (!existsSync(tsconfigPath)) return;
-  const tsconfig = JSON.parse(readFileSync(tsconfigPath, 'utf-8')) as Record<string, unknown>;
+  const tsconfig = readJsonFile<Record<string, unknown>>(tsconfigPath);
   const co = (tsconfig.compilerOptions as Record<string, unknown>) ?? {};
   const paths = (co.paths as Record<string, string[]>) ?? {};
   const key = `${scopedName}/*`;
@@ -170,7 +223,7 @@ async function patchTsconfigPaths(
  */
 async function patchTsconfigReferences(tsconfigPath: string, refPath: string): Promise<void> {
   if (!existsSync(tsconfigPath)) return;
-  const tsconfig = JSON.parse(readFileSync(tsconfigPath, 'utf-8')) as Record<string, unknown>;
+  const tsconfig = readJsonFile<Record<string, unknown>>(tsconfigPath);
   const refs = (tsconfig.references as Array<{ path: string }>) ?? [];
   if (refs.some((r) => r.path === refPath)) return;
   refs.push({ path: refPath });
@@ -253,25 +306,16 @@ async function runScaffold(options: AddOptions) {
   }
 
   const rootConfig = configResult.data!;
-  const tools = scanAllTools(projectRoot, rootConfig.customTools);
-  const discovered = resolveTool(toolName, tools);
 
-  if (!discovered) {
-    const err = `Tool '${toolName}' not found`;
-    if (json) output({ action: 'add', mode: 'scaffold', success: false, error: err }, { json });
-    else outputError(err, { json });
-    return { success: false };
-  }
-
-  const loaderResult = loadToolConfig(discovered.path);
-  if (!loaderResult.success) {
-    const err = loaderResult.error?.message ?? 'Could not load tool config';
-    if (json) output({ action: 'add', mode: 'scaffold', success: false, error: err }, { json });
-    else outputError(err, { json });
-    return { success: false };
-  }
-
-  const toolConfig = loaderResult.data!;
+  const resolved = await loadResolvedTool(
+    toolName,
+    projectRoot,
+    rootConfig.customTools,
+    json,
+    'scaffold'
+  );
+  if (!resolved.success) return { success: false };
+  const { discovered, toolConfig } = resolved;
 
   if (!toolConfig.scaffold) {
     const err = `Tool '${toolName}' does not support scaffold mode`;
@@ -356,7 +400,7 @@ async function runScaffold(options: AddOptions) {
       // Add as runtime dependency in package.json
       const targetPkgPath = join(targetDir, 'package.json');
       if (existsSync(targetPkgPath)) {
-        const targetPkg = JSON.parse(readFileSync(targetPkgPath, 'utf-8')) as Record<string, unknown>;
+        const targetPkg = readJsonFile<Record<string, unknown>>(targetPkgPath);
         const deps = (targetPkg.dependencies as Record<string, string>) ?? {};
         if (!(pkgResult.scopedName in deps)) {
           deps[pkgResult.scopedName] = 'workspace:*';
@@ -405,7 +449,7 @@ async function runScaffold(options: AddOptions) {
       targetDir,
       sourceName: pkgRelPath,
       scopedName: pkgScopedName,
-      tools,
+      tools: resolved.tools,
       workspaceRoot: projectRoot,
       scope: rootConfig.project.scope,
     });
@@ -484,7 +528,7 @@ async function ensureRootPeerDeps(
   const rootPkgPath = join(projectRoot, 'package.json');
   if (!existsSync(rootPkgPath)) return;
 
-  const rootPkg = JSON.parse(readFileSync(rootPkgPath, 'utf-8')) as Record<string, unknown>;
+  const rootPkg = readJsonFile<Record<string, unknown>>(rootPkgPath);
   const devDeps = (rootPkg.devDependencies as Record<string, string>) ?? {};
 
   let changed = false;
@@ -506,10 +550,7 @@ async function ensureRootPeerDeps(
 // ---------------------------------------------------------------------------
 
 async function mergeJsonFile(filePath: string, patch: Record<string, unknown>): Promise<void> {
-  let existing: Record<string, unknown> = {};
-  if (existsSync(filePath)) {
-    existing = JSON.parse(readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
-  }
+  const existing = readJsonFile<Record<string, unknown>>(filePath);
   const merged = { ...existing, ...patch };
   await mkdir(join(filePath, '..'), { recursive: true });
   await writeFile(filePath, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
@@ -519,10 +560,7 @@ async function mergeClaudeHooks(
   filePath: string,
   hooks: Record<string, Array<{ matcher: string; hooks: Array<{ type: string; command: string }> }>>
 ): Promise<void> {
-  let existing: Record<string, unknown> = {};
-  if (existsSync(filePath)) {
-    existing = JSON.parse(readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
-  }
+  const existing = readJsonFile<Record<string, unknown>>(filePath);
   const existingHooks =
     (existing.hooks as Record<string, Array<{ matcher: string }>> ) ?? {};
 
@@ -541,14 +579,8 @@ async function mergeClaudeHooks(
   await writeFile(filePath, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
 }
 
-import type { Config } from '../types/config.js';
-import type { WorkspaceConfig } from '../types/tool-config.js';
-
 async function mergeVscodeExtensions(filePath: string, extensions: string[]): Promise<void> {
-  let existing: { recommendations?: string[] } = {};
-  if (existsSync(filePath)) {
-    existing = JSON.parse(readFileSync(filePath, 'utf-8')) as typeof existing;
-  }
+  const existing = readJsonFile<{ recommendations?: string[] }>(filePath);
   const current = existing.recommendations ?? [];
   for (const ext of extensions) {
     if (!current.includes(ext)) current.push(ext);
@@ -652,7 +684,7 @@ async function ensureConfigsEntry(
       exports: {},
     };
   } else {
-    pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8')) as Record<string, unknown>;
+    pkgJson = readJsonFile<Record<string, unknown>>(pkgJsonPath);
   }
 
   // Build per-tool export patterns (one * per pattern — Node.js requirement).
@@ -667,7 +699,7 @@ async function ensureConfigsEntry(
   const toolPkgJsonPath = join(toolPath, 'template', 'package.json');
   let peerDepsToPropagate: Record<string, string> = {};
   if (existsSync(toolPkgJsonPath)) {
-    const toolPkg = JSON.parse(readFileSync(toolPkgJsonPath, 'utf-8')) as Record<string, unknown>;
+    const toolPkg = readJsonFile<Record<string, unknown>>(toolPkgJsonPath);
     for (const field of ['dependencies', 'devDependencies', 'peerDependencies'] as const) {
       if (toolPkg[field] && typeof toolPkg[field] === 'object') {
         const merged = (pkgJson[field] as Record<string, string>) ?? {};
@@ -729,25 +761,16 @@ async function runShareable(options: AddOptions) {
   }
 
   const rootConfig = configResult.data!;
-  const tools = scanAllTools(projectRoot, rootConfig.customTools);
-  const discovered = resolveTool(toolName, tools);
 
-  if (!discovered) {
-    const err = `Tool '${toolName}' not found`;
-    if (json) output({ action: 'add', mode: 'shareable', success: false, error: err }, { json });
-    else outputError(err, { json });
-    return { success: false };
-  }
-
-  const loaderResult = loadToolConfig(discovered.path);
-  if (!loaderResult.success) {
-    const err = loaderResult.error?.message ?? 'Could not load tool config';
-    if (json) output({ action: 'add', mode: 'shareable', success: false, error: err }, { json });
-    else outputError(err, { json });
-    return { success: false };
-  }
-
-  const toolConfig = loaderResult.data!;
+  const resolved = await loadResolvedTool(
+    toolName,
+    projectRoot,
+    rootConfig.customTools,
+    json,
+    'shareable'
+  );
+  if (!resolved.success) return { success: false };
+  const { discovered, toolConfig } = resolved;
 
   // Ensure required tools (e.g. pnpm) are set up before creating shared packages
   if (toolConfig.requires && toolConfig.requires.length > 0) {
@@ -808,25 +831,16 @@ async function runLink(options: AddOptions) {
   }
 
   const rootConfig = configResult.data!;
-  const tools = scanAllTools(projectRoot, rootConfig.customTools);
-  const discovered = resolveTool(toolName, tools);
 
-  if (!discovered) {
-    const err = `Tool '${toolName}' not found`;
-    if (json) output({ action: 'add', mode: 'link', success: false, error: err }, { json });
-    else outputError(err, { json });
-    return { success: false };
-  }
-
-  const loaderResult = loadToolConfig(discovered.path);
-  if (!loaderResult.success) {
-    const err = loaderResult.error?.message ?? 'Could not load tool config';
-    if (json) output({ action: 'add', mode: 'link', success: false, error: err }, { json });
-    else outputError(err, { json });
-    return { success: false };
-  }
-
-  const toolConfig = loaderResult.data!;
+  const resolved = await loadResolvedTool(
+    toolName,
+    projectRoot,
+    rootConfig.customTools,
+    json,
+    'link'
+  );
+  if (!resolved.success) return { success: false };
+  const { discovered, toolConfig } = resolved;
 
   // Ensure required tools (e.g. pnpm) are set up before linking
   if (toolConfig.requires && toolConfig.requires.length > 0) {
@@ -885,7 +899,7 @@ async function runLink(options: AddOptions) {
   if (configsName) {
     const targetPkgPath = join(targetPath, 'package.json');
     if (existsSync(targetPkgPath)) {
-      const targetPkg = JSON.parse(readFileSync(targetPkgPath, 'utf-8')) as Record<string, unknown>;
+      const targetPkg = readJsonFile<Record<string, unknown>>(targetPkgPath);
       const devDeps = (targetPkg.devDependencies as Record<string, string>) ?? {};
       if (!(configsName in devDeps)) {
         devDeps[configsName] = 'workspace:*';
@@ -964,6 +978,8 @@ async function runLocal(options: AddOptions) {
 
   const toolConfig = loaderResult.data!;
 
+  // TODO(P1-04): Remove this gate — spec says any built-in tool can be forked via --local.
+  // customizable is not a spec concept; this check will be removed in P1-04.
   if (!toolConfig.customizable) {
     const err = `Tool '${toolName}' does not support --local`;
     if (json) output({ action: 'add', mode: 'local', success: false, error: err }, { json });
@@ -1100,12 +1116,13 @@ export async function addCommand(options: AddOptions) {
   if (local) return runLocal(options);
   if (name) return runScaffold(options);
 
+  // Hoist a single readConfig() call shared by both branches below.
+  const configResult = readConfig();
+  const customPaths = configResult.data?.customTools ?? [];
+  const tools = scanAllTools(projectRoot, customPaths);
+
   if (target) {
     // Resolve once to distinguish: known tool → link, project path → project dependency
-    const configResult = readConfig();
-    const customPaths = configResult.data?.customTools ?? [];
-    const tools = scanAllTools(projectRoot, customPaths);
-
     if (resolveTool(toolName, tools)) {
       return runLink(options);
     }
@@ -1123,19 +1140,13 @@ export async function addCommand(options: AddOptions) {
   }
 
   // No target, no name, no local — detect from tool kind
-  {
-    const configResult = readConfig();
-    const customPaths = configResult.data?.customTools ?? [];
-    const allTools = scanAllTools(projectRoot, customPaths);
-    const discovered = resolveTool(toolName, allTools);
-
-    if (discovered) {
-      const loaderResult = loadToolConfig(discovered.path);
-      if (loaderResult.success) {
-        const kind = loaderResult.data?.kind;
-        if (kind === 'shareable') return runShareable(options);
-        if (kind === 'root') return runRoot(options);
-      }
+  const discovered = resolveTool(toolName, tools);
+  if (discovered) {
+    const loaderResult = loadToolConfig(discovered.path);
+    if (loaderResult.success) {
+      const kind = loaderResult.data?.kind;
+      if (kind === 'shareable') return runShareable(options);
+      if (kind === 'root') return runRoot(options);
     }
   }
 
@@ -1156,7 +1167,7 @@ export function AddCommand({
   name,
   target,
 }: {
-  mode: 'scaffold' | 'link' | 'local' | 'project' | 'install';
+  mode: 'scaffold' | 'link' | 'local' | 'project' | 'root-or-shareable';
   toolName: string;
   name?: string;
   target?: string;
@@ -1185,7 +1196,7 @@ export function AddCommand({
     );
   }
 
-  if (mode === 'install') {
+  if (mode === 'root-or-shareable') {
     return <Text color="cyan">Installing {toolName}…</Text>;
   }
 

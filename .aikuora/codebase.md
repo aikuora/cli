@@ -129,8 +129,17 @@ are dispatched via `invokeIntegrationHandler` in `src/utils/integration.ts`.
 
 ## Active Context
 
-**Current task:** (none — run /plan tasks to get started)
+**Current task:** P0-08 (Phase 0 complete — all Code Optimization tasks done)
 
-**Relevant files:** (none)
+**Relevant files:**
 
-**Recent discoveries:** (none)
+- `/Users/ccosming/Github/aikuora/cli/src/commands/add.tsx` — refactored: `readJsonFile` helper, `loadResolvedTool` helper, imports consolidated, duplicate `readConfig` eliminated
+- `/Users/ccosming/Github/aikuora/cli/src/core/scanner.ts` — `scanCustomTools` fixed to use `basename(absolutePath)`
+- `/Users/ccosming/Github/aikuora/cli/src/utils/moon.ts` — `taskToEntry` helper extracted, three duplicate task-building blocks replaced
+- `/Users/ccosming/Github/aikuora/cli/src/utils/template.ts` — `getTemplatesPath` aligned with `getBuiltInToolsPath` two-level detection
+- `/Users/ccosming/Github/aikuora/cli/src/index.tsx` — `mode` type updated from `'install'` to `'root-or-shareable'`
+
+**Recent discoveries:**
+
+- `resolveTool` returns `DiscoveredTool | null`; the success branch of `loadResolvedTool` must explicitly type `discovered` as `DiscoveredTool` (not `ReturnType<typeof resolveTool>`) to avoid null narrowing issues downstream.
+- `OutputOptions.json` is `boolean | undefined`; when passing to `output()`/`outputError()` inside a generic helper, use `json ?? false` to satisfy the strict `{ json: boolean }` parameter type.

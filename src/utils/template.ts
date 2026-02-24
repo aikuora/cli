@@ -1,5 +1,5 @@
 import { access, copyFile, mkdir, readdir, readFile, stat, writeFile } from 'fs/promises';
-import { dirname, join, resolve } from 'path';
+import { basename, dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 import Handlebars from 'handlebars';
@@ -8,8 +8,14 @@ import Handlebars from 'handlebars';
  * Get the path to the templates directory
  */
 export function getTemplatesPath(): string {
+  // Bundled:  import.meta.url → dist/index.js    → dirname = dist/       → 1 level up = CLI root
+  // Dev/test: import.meta.url → src/utils/template.ts → dirname = src/utils/ → 2 levels up = CLI root
   const currentFilePath = fileURLToPath(import.meta.url);
-  const cliRoot = resolve(dirname(currentFilePath), '../');
+  const currentDir = dirname(currentFilePath);
+  const cliRoot =
+    basename(currentDir) === 'dist'
+      ? resolve(currentDir, '..')
+      : resolve(currentDir, '../..');
   return join(cliRoot, 'templates');
 }
 

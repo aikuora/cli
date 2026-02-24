@@ -5,12 +5,12 @@ current_phase: 0
 phases:
   - id: 0
     name: "Code Optimization & Simplification"
-    status: pending
+    status: completed
     tasks:
       - id: P0-01
         title: "Extract readJsonFile helper to eliminate duplicated JSON read pattern"
         spec_ref: null
-        status: pending
+        status: completed
         note: >
           In src/commands/add.tsx the pattern
           `existsSync(p) ? JSON.parse(readFileSync(p, 'utf-8')) as T : {}` appears
@@ -25,7 +25,7 @@ phases:
       - id: P0-02
         title: "Extract loadResolvedTool helper to eliminate tool-resolution boilerplate"
         spec_ref: null
-        status: pending
+        status: completed
         note: >
           In src/commands/add.tsx the triplet
           scanAllTools → resolveTool → loadToolConfig with three separate error
@@ -40,7 +40,7 @@ phases:
       - id: P0-03
         title: "Move mid-file import statements to top of add.tsx"
         spec_ref: null
-        status: pending
+        status: completed
         note: >
           In src/commands/add.tsx, `import type { Config }` (line 544) and
           `import type { WorkspaceConfig }` (line 545) appear in the middle of the
@@ -53,7 +53,7 @@ phases:
       - id: P0-04
         title: "Fix scanCustomTools — use basename instead of dirname for tool name"
         spec_ref: null
-        status: pending
+        status: completed
         note: >
           In src/core/scanner.ts line 106, scanCustomTools() derives the tool name
           with `dirname(absolutePath).split('/').pop()`. dirname('/path/to/mytool')
@@ -69,7 +69,7 @@ phases:
       - id: P0-05
         title: "Eliminate duplicate readConfig call in addCommand dispatcher"
         spec_ref: null
-        status: pending
+        status: completed
         note: >
           In src/commands/add.tsx, addCommand() calls readConfig() twice: once at
           line 1105 for the `if (target)` branch, and again at line 1127 for the
@@ -84,7 +84,7 @@ phases:
       - id: P0-06
         title: "Extract MoonTaskEntry builder to eliminate task-building duplication in moon.ts"
         spec_ref: null
-        status: pending
+        status: completed
         note: >
           In src/utils/moon.ts the same task-to-entry conversion is copy-pasted in
           three places: buildMoonConfig (lines 31-35), addMoonTask (lines 76-80),
@@ -99,7 +99,7 @@ phases:
       - id: P0-07
         title: "Fix getTemplatesPath to use same two-level detection as getBuiltInToolsPath"
         spec_ref: null
-        status: pending
+        status: completed
         note: >
           In src/utils/template.ts, getTemplatesPath() resolves the CLI root with
           `resolve(dirname(currentFilePath), '../')` — one level up. In the bundled
@@ -117,7 +117,7 @@ phases:
       - id: P0-08
         title: "Remove dead customizable check documentation inconsistency in runLocal"
         spec_ref: null
-        status: pending
+        status: completed
         note: >
           In src/commands/add.tsx, runLocal() checks `toolConfig.customizable`
           (line 967) and returns an error if false. The AddOptions interface JSDoc

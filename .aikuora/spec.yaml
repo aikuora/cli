@@ -1,0 +1,1407 @@
+# Spec: aikuora CLI
+# Developer workspace automation CLI for moonrepo monorepos.
+
+domain: "aikuora CLI"
+description: >
+  A command-line tool that automates the setup and maintenance of developer
+  workspaces inside moonrepo monorepos. It solves the problem of manually
+  wiring tools, editor settings, task configurations, and shared packages
+  into each project. The CLI discovers tools by priority, scaffolds new
+  projects from templates, links external tools to projects declaratively,
+  and keeps workspace-level integrations (editor settings, git ignore rules,
+  inherited tasks) idempotent and conflict-free.
+
+# ---------------------------------------------------------------------------
+# Layer 1: World Model
+# ---------------------------------------------------------------------------
+
+actors:
+  developer:
+    description: "A human engineer running the aikuora CLI in their terminal"
+    can:
+      - initialize a workspace with aikuora init
+      - add a scaffold or create a shareable config package or create a root config via aikuora add
+      - fork a built-in tool to the workspace tools/ directory via aikuora add <tool> --local
+      - inspect workspace metadata with aikuora info
+      - list tools, apps, packages, and modules with aikuora list
+    cannot:
+      - run any aikuora command outside a workspace (no aikuora.workspace.yml found by walking up from cwd)
+      - scaffold into a target path that already exists
+      - add a tool that does not exist in the resolved tool registry
+      - produce duplicate entries in workspace integration files (VSCode settings, .gitignore, Moon tasks)
+      - directly invoke link mode (aikuora add <tool> <target>) in v1 — this is deferred to a future version
+      - directly invoke project dependency wiring (aikuora add <pkg> <target>) in v1 — this is deferred to a future version
+
+  ai_agent:
+    description: "An automated process or AI assistant invoking the CLI non-interactively"
+    can:
+      - run any aikuora command with --json flag for structured output
+      - consume structured JSON output from all list and info commands
+      - detect failure via exit code 1
+    cannot:
+      - bypass pre-condition checks
+      - suppress warnings emitted to stderr
+
+  system:
+    description: "The CLI runtime itself performing automated resolution and patching"
+    can:
+      - discover and resolve tools by priority (customTools > tools/ > built-in)
+      - resolve the requires chain for a tool depth-first before applying the target tool
+      - dispatch declarative integration patches idempotently
+      - dispatch JS handler integrations
+      - merge workspace integrations without introducing duplicates
+      - warn on VSCode settings key conflicts without blocking the operation
+      - warn on re-adding an already-linked tool (top-level tool only) without blocking the operation
+      - validate aikuora.workspace.yml against the workspace_config schema before executing any command
+      - automatically trigger ADD-002 (link mode) for each devtools entry when processing ADD-001 (scaffold)
+      - automatically trigger ADD-006 (project dependency mode) for each packages entry when processing ADD-001 (scaffold)
+    cannot:
+      - delete or destructively overwrite existing project files
+      - silently drop a VSCode settings key conflict without warning
+      - apply a workspace integration patch that would introduce a duplicate entry
+
+entities:
+  workspace:
+    description: >
+      The root of an aikuora-managed monorepo, identified by the presence of
+      aikuora.workspace.yml. All CLI operations resolve the workspace by
+      walking up the directory tree from cwd.
+    attributes:
+      root_path:
+        type: string
+        required: true
+        constraints: "Absolute path to the directory containing aikuora.workspace.yml"
+      scope:
+        type: string
+        required: true
+        constraints: "npm scope, must match /^@[a-z0-9-]+$/"
+      name:
+        type: string
+        required: true
+        constraints: "1 to 100 characters, human-readable workspace name"
+    states: ["active"]
+    transitions:
+      active:
+        - to: "active"
+          when: "Workspace is re-initialized (idempotent reinit is a no-op)"
+          actor: "developer"
+    has_one: "workspace_config"
+    has_many: "project"
+    rules:
+      - "A workspace is identified by a single aikuora.workspace.yml at its root"
+      - "The scope field must match /^@[a-z0-9-]+$/"
+      - "aikuora.workspace.yml must be locatable by walking up from cwd; if not found, all commands fail with a clear error"
+      - "A workspace has exactly one scope that prefixes all project package names"
+      - "A workspace cannot be initialized inside a directory whose ancestor already contains an aikuora.workspace.yml"
+      - "Projects are discovered by scanning the directories declared in aikuora.workspace.yml's structure property and reading aikuora.project.yml files found there; there is no separate registration file"
+
+  workspace_config:
+    description: >
+      The aikuora.workspace.yml file that declares the workspace scope, name,
+      and workspace-level integration settings (VSCode, gitignore, Moon inherited tasks).
+    attributes:
+      scope:
+        type: string
+        required: true
+        constraints: "npm scope matching /^@[a-z0-9-]+$/"
+      name:
+        type: string
+        required: true
+        constraints: "1 to 100 characters"
+      integrations:
+        type: map
+        required: false
+        constraints: "Structured integration config block with per-integration settings for VSCode, Claude hooks, Moon inherited tasks, and gitignore"
+    belongs_to: "workspace"
+    rules:
+      - "workspace_config must exist before any other aikuora command can run"
+      - "scope in workspace_config is the single source of truth for the workspace scope"
+      - "Before executing any command, aikuora validates aikuora.workspace.yml against the workspace_config schema; if invalid (missing name, missing scope, or scope not matching /^@[a-z0-9-]+$/), a descriptive error is shown and the command exits with code 1"
+
+  tool:
+    description: >
+      A reusable unit of automation that can be linked to a project. Tools
+      define tasks, integration patches, and dependency chains. Tools are
+      discovered from the built-in package, the tools/ directory, and paths
+      listed in customTools in aikuora.workspace.yml. When a name collision
+      occurs, customTools takes priority over tools/ which takes priority over
+      built-in. All tools are treated uniformly by their aikuora.tool.yml
+      definition regardless of source. The source of a tool (built-in vs
+      custom) is not a spec-level concept and is inferred by whether the tool
+      name appears in customTools in aikuora.workspace.yml.
+    attributes:
+      name:
+        type: string
+        required: true
+        constraints: "1 to 80 characters, must match /^[a-z][a-z0-9-]*$/, unique in the resolved registry (highest-priority source wins on collision)"
+      kind:
+        type: enum
+        required: true
+        values: ["shareable", "root", "none"]
+        constraints: >
+          shareable: tool creates/updates the shared config package (packages/configs/);
+          root: tool configures the workspace root (moon, node, pnpm);
+          none: tool is linkable and/or scaffoldable only; no shared package or root changes
+      requires:
+        type: "list[string]"
+        required: false
+        constraints: "Ordered list of tool names that must be installed before this tool, resolved depth-first"
+      variants:
+        type: "map[string, link_variant]"
+        required: false
+        constraints: "Named map of link variants this tool supports; key is variant name, value is the link_variant definition"
+    has_many: "tool_config"
+    rules:
+      - "Tools are discovered from the built-in package, the tools/ directory, and paths listed in customTools; if a name collision occurs, customTools > tools/ > built-in"
+      - "A tool's requires chain must be installed depth-first before the tool itself is applied"
+      - "Tool names must be unique within the resolved registry; on collision the highest-priority source wins"
+      - "A tool that does not exist in the resolved registry cannot be linked to a project"
+      - "If a tool declares variants, the developer must supply a variant argument when linking; omitting the variant is an error"
+
+  tool_config:
+    description: >
+      The configuration values supplied when linking a tool to a project.
+      Tool configs are validated against the tool's declared schema before
+      being applied.
+    attributes:
+      tool_name:
+        type: string
+        required: true
+        constraints: "Must reference an existing tool name in the resolved registry"
+      values:
+        type: string
+        required: false
+        constraints: "Key-value pairs conforming to the tool's declared config schema"
+    belongs_to: "tool"
+    rules:
+      - "tool_config values must pass the tool's declared validation schema before the tool is applied"
+      - "If validation fails, the tool is not applied and the user is informed of the invalid fields"
+
+  project:
+    description: >
+      A package within the monorepo workspace (app, package, module, or
+      shareable config package). Each project is identified by its path
+      relative to the workspace root and has an aikuora.project.yml
+      describing its linked tools and metadata. Root tool installations
+      operate at workspace level only and have no corresponding project entity
+      or aikuora.project.yml.
+    attributes:
+      name:
+        type: string
+        required: true
+        constraints: "1 to 100 characters, must match /^[a-z][a-z0-9-]*$/; combined with workspace scope forms the package name"
+      path:
+        type: string
+        required: true
+        constraints: "Path relative to workspace root; must be unique within the workspace"
+      kind:
+        type: enum
+        required: true
+        values: ["app", "package", "module", "shareable"]
+    states: ["app", "package", "module", "shareable"]
+    transitions:
+      app:
+        - to: "package"
+          when: "Project kind is changed by the developer in aikuora.project.yml"
+          actor: "developer"
+        - to: "module"
+          when: "Project kind is changed by the developer in aikuora.project.yml"
+          actor: "developer"
+      package:
+        - to: "app"
+          when: "Project kind is changed by the developer in aikuora.project.yml"
+          actor: "developer"
+        - to: "module"
+          when: "Project kind is changed by the developer in aikuora.project.yml"
+          actor: "developer"
+      module:
+        - to: "app"
+          when: "Project kind is changed by the developer in aikuora.project.yml"
+          actor: "developer"
+        - to: "package"
+          when: "Project kind is changed by the developer in aikuora.project.yml"
+          actor: "developer"
+      shareable:
+        - to: "package"
+          when: "Project kind is changed by the developer in aikuora.project.yml"
+          actor: "developer"
+    belongs_to: "workspace"
+    has_one: "project_file"
+    has_many: "tool_config"
+    rules:
+      - "A project path must be unique within the workspace"
+      - "A project's package name is the workspace scope combined with the project name (e.g., @scope/name)"
+      - "A project must have an aikuora.project.yml at its root"
+      - "A project can have zero or more tools linked to it"
+      - "Projects are discovered by directory scan of the paths declared in aikuora.workspace.yml's structure property; a directory without an aikuora.project.yml is not recognized as a project"
+      - "Root tool installations (kind=root) are not represented as projects; aikuora list and aikuora info do not show them as projects"
+      - "Shareable config packages (kind=shareable) ARE listed by aikuora list packages"
+      - "Transitions from shareable to app or shareable to module are not allowed; a shareable config package can only transition to kind=package"
+
+  project_file:
+    description: >
+      The aikuora.project.yml file at the root of a project directory. It
+      declares the project kind, name, the list of tools linked to the project,
+      the scaffold_tool reference used to derive the project language, and the
+      list of aikuora-tracked dependencies.
+    attributes:
+      kind:
+        type: enum
+        required: true
+        values: ["app", "package", "module", "shareable"]
+      name:
+        type: string
+        required: true
+        constraints: "Must match the project name in the workspace"
+      scaffold_tool:
+        type: string
+        required: false
+        constraints: "Name of the scaffold tool used to create this project; used by ADD-006 to derive the project's lang via the scaffold tool's aikuora.tool.yml"
+      tools:
+        type: string
+        required: false
+        constraints: "List of tool link entries, each referencing a resolved tool name"
+      dependencies:
+        type: string
+        required: false
+        constraints: "List of aikuora-tracked source package dependencies (shared_config_packages this project depends on)"
+    belongs_to: "project"
+    rules:
+      - "aikuora.project.yml is the single source of truth for which tools are linked to a project"
+      - "Adding a tool records it in aikuora.project.yml"
+      - "Re-linking an already-linked tool emits a warning but re-applies the tool configuration"
+      - "Root tool installs (kind=root tool) do NOT produce an aikuora.project.yml — no project file is created for root mode"
+
+  shared_config_package:
+    description: >
+      A shareable configuration package (kind=shareable) that contains
+      reusable tool configuration meant to be consumed by multiple projects.
+      It is itself a project in the workspace and is listed by aikuora list packages.
+    attributes:
+      name:
+        type: string
+        required: true
+        constraints: "1 to 100 characters, kebab-case"
+      kind:
+        type: enum
+        required: true
+        values: ["shareable"]
+    belongs_to: "workspace"
+    rules:
+      - "A shareable config package is scaffolded with no --target project; it is itself the target"
+      - "A shareable config package can be added as a dependency to other projects"
+      - "A shareable config package has an aikuora.project.yml with kind=shareable in its directory (e.g., packages/configs/)"
+      - "Shareable packages are included in the output of aikuora list packages"
+
+  moon_task:
+    description: >
+      A task definition contributed to a project's Moon configuration by a
+      linked tool. Moon tasks define build, test, lint, and other automation
+      steps.
+    attributes:
+      name:
+        type: string
+        required: true
+        constraints: "1 to 80 characters, unique within the project's Moon configuration"
+      command:
+        type: string
+        required: true
+        constraints: "The shell command Moon will run for this task"
+      inherited:
+        type: boolean
+        required: true
+        default: false
+        constraints: "True if the task is declared at workspace level and inherited by all projects"
+    belongs_to: "project"
+    rules:
+      - "A moon_task name must be unique within the project's Moon configuration"
+      - "Inherited tasks are defined in .moon/tasks/<filename>.yml under the tasks: key and applied to all projects; no project-level duplicate may exist"
+      - "Adding a task that already exists in a project's Moon config is idempotent (no duplicate is created)"
+      - "The Moon workspace configuration is at .moon/workspace.yml"
+
+  link_variant:
+    description: >
+      A named configuration variant of a tool that determines how the tool
+      is integrated into a project (e.g., 'react' vs 'vue' variant of a
+      linting tool).
+    attributes:
+      name:
+        type: string
+        required: true
+        constraints: "1 to 80 characters"
+      tool_name:
+        type: string
+        required: true
+        constraints: "Must reference an existing tool name"
+    belongs_to: "tool"
+    rules:
+      - "A link_variant must belong to exactly one tool"
+      - "If a tool supports variants, the developer must specify one when linking; omitting the variant exits with code 1 and lists the available variants"
+      - "If a tool has no variants, no variant selection is needed"
+
+  dependent_integration:
+    description: >
+      A dependency relationship between a project and a shared_config_package,
+      declared so that the shared config is available to the project at build time.
+    attributes:
+      project_path:
+        type: string
+        required: true
+        constraints: "Relative path to the dependent project within the workspace"
+      package_path:
+        type: string
+        required: true
+        constraints: "Relative path to the shared_config_package within the workspace"
+    belongs_to: "project"
+    rules:
+      - "A project can depend on zero or more shared_config_packages"
+      - "Adding a dependency that already exists is idempotent"
+
+  scaffold_template:
+    description: >
+      A Handlebars template set used by aikuora add (scaffold mode) to
+      generate project files for a new project.
+    attributes:
+      name:
+        type: string
+        required: true
+        constraints: "1 to 80 characters, matches the --name argument of aikuora add"
+      files:
+        type: string
+        required: true
+        constraints: "Set of Handlebars template files to render into the new project directory"
+      lang:
+        type: enum
+        required: false
+        values: ["node", "python"]
+        constraints: "Language of the scaffold; determines which manifest file is updated when adding a project dependency (node -> package.json, python -> pyproject.toml)"
+    rules:
+      - "A scaffold_template must exist for the --name value passed to aikuora add"
+      - "The target directory for a scaffold must not already exist before scaffolding begins"
+      - "All template variables must be resolvable at scaffold time; unresolvable variables cause a failure before any files are written"
+
+  workspace_integration_config:
+    description: >
+      A per-integration configuration block that describes how a tool or
+      scaffold contributes to workspace-level files such as VSCode settings,
+      Claude hooks, Moon inherited tasks, and .gitignore.
+    attributes:
+      integration_type:
+        type: enum
+        required: true
+        values: ["vscode_settings", "claude_hooks", "moon_inherited_tasks", "gitignore"]
+      patch_mode:
+        type: enum
+        required: true
+        values: ["declarative", "js_handler"]
+      idempotent_if:
+        type: string
+        required: false
+        constraints: "String that must NOT be present in the target file for the patch to be applied; when present, the ENTIRE integration is skipped (VSCode settings, Claude hooks, Moon tasks, .gitignore patches all omitted)"
+    belongs_to: "tool"
+    rules:
+      - "All workspace integration patches are idempotent: if the idempotent_if string is already present in the target file, the ENTIRE integration block is skipped — including VSCode settings, Claude hooks, Moon tasks, and .gitignore patches"
+      - "A VSCode settings key conflict (existing key with different value) emits a warning but the new value is applied"
+      - "No duplicate entries are ever introduced into .gitignore, Moon inherited tasks, or Claude hooks"
+      - "Declarative patches use idempotent_if string check; JS handler patches implement their own idempotency"
+      - "Claude hooks configuration is at .claude/settings.json at the workspace root; hooks are compared by matcher + hooks array content; duplicates are not added"
+
+  prototools_config:
+    description: >
+      The .prototools file at the workspace root that pins runtime versions
+      as TOML key=value pairs (e.g. node = "22.0.0", pnpm = "10.0.0").
+    attributes:
+      location:
+        type: string
+        required: true
+        constraints: "Always at the workspace root (.prototools)"
+      format:
+        type: string
+        required: true
+        constraints: "TOML key=value pairs; each key is a runtime name, each value is a version string"
+    rules:
+      - "If .prototools is absent, INFO-001 silently omits the runtime version pins section — no error is raised"
+
+# ---------------------------------------------------------------------------
+# CLI Argument Syntax Disambiguation
+# ---------------------------------------------------------------------------
+# The six ADD modes are distinguished by the following argument patterns:
+#
+#   1. add <tool> --name <name>
+#        -> Scaffold mode (ADD-001): --name flag present
+#   2. add <tool> <target>  (tool is a known tool name, target is a path)
+#        -> Link mode (ADD-002): INTERNAL — auto-invoked by ADD-001 when
+#           processing scaffold devtools entries. Direct developer invocation
+#           is deferred to a future version.
+#   3. add <path/or/name> <target>  (first arg is NOT a known tool name)
+#        -> Project dependency mode (ADD-006): INTERNAL — auto-invoked by
+#           ADD-001 when processing scaffold packages entries. Direct developer
+#           invocation is deferred to a future version.
+#   4. add <tool>  (no target, tool.kind = shareable)
+#        -> Shareable mode (ADD-003): no target, resolved tool has kind=shareable
+#   5. add <tool>  (no target, tool.kind = root)
+#        -> Root mode (ADD-004): no target, resolved tool has kind=root
+#   6. add <tool> --local
+#        -> Local fork mode (ADD-005): --local flag present, no target argument;
+#           forks the built-in tool to the workspace's tools/<toolName>/ directory
+#
+# Note: Modes 4 and 5 share the same CLI syntax; disambiguation is by tool.kind.
+#       Shareable mode is triggered when tool.kind=shareable.
+#       Root mode is triggered when tool.kind=root.
+#
+# Note on kind=none with no flags (G-M-002):
+#       If a tool exists with kind=none and no target, --name, or --local flag
+#       is provided, the behavior in v1 is handled by auto-invocation from
+#       scaffold (ADD-001); direct developer invocation with no target is
+#       deferred to a future version. The ONLY user-facing error for a bare
+#       `aikuora add <toolname>` is when the tool name does not exist in
+#       the registry: "Tool '<name>' not found in registry".
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Package Manifest Language Mapping
+# ---------------------------------------------------------------------------
+# When ADD-006 adds a project dependency, it updates two things:
+#   1. The target project's language manifest file (determined by the scaffold
+#      tool's lang field, derived via the chain:
+#        target project's aikuora.project.yml -> scaffold_tool reference ->
+#        load that tool's aikuora.tool.yml -> read lang attribute):
+#        - lang=node   -> package.json  (adds dependency with workspace:* version)
+#        - lang=python -> pyproject.toml (adds dependency)
+#   2. The target project's aikuora.project.yml (adds the source package to
+#      the dependencies list for aikuora tracking)
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Layer 2: Behaviors
+# ---------------------------------------------------------------------------
+
+behaviors:
+  STARTUP-001:
+    actor: "system"
+    description: >
+      Validate aikuora.workspace.yml against the workspace_config schema
+      before executing any command. This is an implicit pre-step that runs
+      universally before any CLI command proceeds.
+    trigger: "Any aikuora CLI command is invoked"
+    pre_conditions:
+      - "A workspace is found by walking up from cwd"
+    result:
+      - "If aikuora.workspace.yml is valid (name present, scope present and matching /^@[a-z0-9-]+$/), the command proceeds normally"
+      - "If aikuora.workspace.yml is invalid, execution is halted"
+    side_effects: []
+    on_failure:
+      - "A descriptive error naming the specific invalid field is shown to the developer"
+      - "Exit code 1 is returned"
+      - "The requested command does not execute"
+
+  INIT-001:
+    actor: "developer"
+    description: >
+      Initialize a new aikuora workspace in the current directory by creating
+      aikuora.workspace.yml with the declared scope and name.
+    pre_conditions:
+      - "The current directory does not already contain an aikuora.workspace.yml"
+      - "No ancestor directory (walking up from cwd) contains an aikuora.workspace.yml"
+      - "The scope argument is provided and matches /^@[a-z0-9-]+$/"
+      - "The name argument is provided and is between 1 and 100 characters"
+    result:
+      - "aikuora.workspace.yml is created at the current directory with scope and name populated"
+      - "The current directory is now a recognized aikuora workspace"
+    side_effects:
+      - "Default workspace-level integration stubs may be written (e.g., initial .gitignore entries)"
+    on_failure:
+      - "No files are written"
+      - "If an ancestor directory contains an aikuora.workspace.yml, the developer is informed: 'Cannot initialize workspace inside an existing aikuora workspace at <path>'"
+      - "Developer is informed of the specific pre-condition that was not met (invalid scope format, missing name, or workspace already exists in current directory)"
+
+  ADD-001:
+    actor: "developer"
+    description: >
+      Scaffold mode: generate a new project directory from a named template
+      using aikuora add --name <template>. After rendering template files,
+      the system automatically triggers ADD-002 for each entry in the
+      scaffold's devtools list and ADD-006 for each entry in the scaffold's
+      packages list.
+    pre_conditions:
+      - "A workspace is found by walking up from cwd"
+      - "A scaffold_template matching the --name value exists in the template registry"
+      - "The target path for the new project does not already exist"
+      - "All required template variables can be resolved"
+    result:
+      - "A new project directory is created at the specified target path"
+      - "All scaffold_template files are rendered and written into the new directory"
+      - "An aikuora.project.yml is present in the new project directory"
+      - "ADD-002 is automatically invoked for each devtools entry declared by the scaffold"
+      - "ADD-006 is automatically invoked for each packages entry declared by the scaffold"
+    side_effects:
+      - "The new project becomes discoverable by aikuora list and aikuora info once its directory appears under a path declared in aikuora.workspace.yml's structure property"
+    on_failure:
+      - "If scaffold fails before any files are written, no files are written"
+      - "If scaffold fails midway (partial directory created) and cleanup of the partial directory succeeds, the partial directory is removed and the developer is informed of the original failure"
+      - "If scaffold fails midway AND cleanup of the partial directory also fails, BOTH the original failure and the cleanup failure are reported; the partial directory is left in place; exit code 1 is returned; the developer must manually delete the directory before retrying"
+      - "Developer is informed whether the template does not exist, the target path already exists, or a required variable could not be resolved"
+
+  ADD-002:
+    actor: "system"
+    description: >
+      Link mode: link an existing tool to an existing project. Triggered
+      automatically during scaffold (ADD-001) when processing devtools entries.
+      Direct developer invocation (aikuora add <tool> <target>) is deferred
+      to a future version.
+    trigger: "ADD-001 processes a devtools entry in the scaffold template"
+    pre_conditions:
+      - "A workspace is found by walking up from cwd"
+      - "The named tool exists in the resolved tool registry (customTools > tools/ > built-in)"
+      - "The target project path exists within the workspace"
+      - "The tool's config values (if any) pass the tool's validation schema"
+      - "If the tool declares variants, a variant argument must be provided"
+    result:
+      - "The tool is recorded in the target project's aikuora.project.yml"
+      - "The tool's requires chain is installed depth-first before the tool itself is applied"
+      - "All integration patches declared by the tool are applied to workspace and project files"
+      - "Moon tasks declared by the tool are added to the project's Moon configuration"
+    side_effects:
+      - "Workspace-level integration files (VSCode settings, .gitignore, Moon inherited tasks, Claude hooks) are updated idempotently"
+      - "A warning is emitted if the top-level tool (directly requested) was already linked to this project; the tool config is re-applied regardless. Required tools installed transitively via the requires chain do NOT emit a re-link warning even if already present."
+    on_failure:
+      - "If the tool is not found, no changes are made and the developer is informed"
+      - "If config validation fails, no changes are made and the invalid fields are reported"
+      - "If the tool declares variants but no variant argument was provided, no changes are made; the developer is informed with a list of available variants and exit code 1 is returned"
+      - "If an integration patch fails, the applied changes up to that point remain; the developer is informed of which patch failed"
+
+  ADD-003:
+    actor: "developer"
+    description: >
+      Shareable mode: create a new shared_config_package in the workspace
+      using aikuora add <tool> where tool.kind=shareable (no target argument).
+      The package is created in packages/configs/ with an aikuora.project.yml
+      with kind=shareable.
+    pre_conditions:
+      - "A workspace is found by walking up from cwd"
+      - "The package name is provided and is unique within the workspace"
+      - "The target path for the new package does not already exist"
+    result:
+      - "A new shared_config_package directory is created with the correct structure under packages/configs/"
+      - "An aikuora.project.yml with kind=shareable is present in the new directory"
+    side_effects:
+      - "The new shared_config_package becomes discoverable by aikuora list packages once its directory appears under a path declared in aikuora.workspace.yml's structure property"
+    on_failure:
+      - "If the operation fails before any files are written, no files are written; error is reported; exit code 1 is returned"
+      - "If the operation fails midway (partial directory created) and cleanup of the partial directory succeeds, the partial directory is removed; the original error is reported; exit code 1 is returned"
+      - "If the operation fails midway AND cleanup of the partial directory also fails, BOTH the original failure and the cleanup failure are reported; the partial directory is left in place; the developer is told to manually delete the directory before retrying; exit code 1 is returned"
+      - "Developer is informed if the name conflicts with an existing project or the path already exists"
+
+  ADD-004:
+    actor: "developer"
+    description: >
+      Root mode: install a root-level tool configuration in the workspace
+      using aikuora add <tool> where tool.kind=root (no target argument).
+      Root tool installations operate at workspace level only — no
+      aikuora.project.yml is created and no project entity is produced.
+    pre_conditions:
+      - "A workspace is found by walking up from cwd"
+      - "The named tool exists in the resolved tool registry with kind=root"
+    result:
+      - "The root tool's configuration and integration patches are applied at the workspace level"
+      - "No aikuora.project.yml is created"
+      - "No project entity is registered in the workspace"
+    side_effects:
+      - "Workspace-level integration files may be updated by the tool's integration patches"
+    on_failure:
+      - "No files are written"
+      - "Developer is informed if the tool does not exist in the registry or the workspace could not be found"
+
+  ADD-005:
+    actor: "developer"
+    description: >
+      Local fork mode: fork a built-in tool into the workspace's tools/
+      directory using aikuora add <tool> --local. There is no target argument
+      — the fork is workspace-scoped, not tied to any specific project. After
+      forking, the local copy at tools/<toolName>/ takes priority over the
+      built-in version for all tool resolutions in this workspace
+      (customTools > tools/ > built-in discovery order applies).
+    pre_conditions:
+      - "A workspace is found by walking up from cwd"
+      - "The named tool exists in the built-in registry (appears in built-in discovery, NOT listed in customTools)"
+      - "A local fork of the same tool does not already exist at tools/<toolName>/ in the workspace"
+    result:
+      - "The built-in tool's directory is copied from the built-in package into the workspace's tools/<toolName>/ directory"
+      - "The local copy at tools/<toolName>/ now takes priority over the built-in version for tool resolution in this workspace"
+    side_effects:
+      - "Subsequent resolutions of this tool name in the workspace use the forked version at tools/<toolName>/"
+    on_failure:
+      - "No files are copied"
+      - "Developer is informed if the tool does not exist in the built-in registry or if a local fork already exists at tools/<toolName>/"
+
+  ADD-006:
+    actor: "system"
+    description: >
+      Project dependency mode: add a shared_config_package as a dependency
+      of a target project. Triggered automatically during scaffold (ADD-001)
+      when processing packages entries. Direct developer invocation
+      (aikuora add <pkg> <target>) is deferred to a future version.
+      This updates both the target project's language manifest file and its
+      aikuora.project.yml. The lang is derived via the chain: target project's
+      aikuora.project.yml -> scaffold_tool reference -> load that tool's
+      aikuora.tool.yml -> read lang attribute. This determines which manifest
+      file to update (node -> package.json at workspace:* version, python ->
+      pyproject.toml).
+    trigger: "ADD-001 processes a packages entry in the scaffold template"
+    pre_conditions:
+      - "A workspace is found by walking up from cwd"
+      - "The package-path references an existing shared_config_package within the workspace"
+      - "The target project path exists within the workspace"
+      - "The target project's project_file declares a scaffold_tool reference"
+      - "The scaffold tool's tool_config declares a lang attribute"
+    result:
+      - "A dependent_integration entry is recorded in the target project's aikuora.project.yml under the dependencies list"
+      - "The target project's language manifest file is updated to include the source package as a dependency: if lang=node, package.json is updated with the source package at workspace:* version; if lang=python, pyproject.toml is updated"
+    side_effects:
+      - "If the dependency already exists in both the manifest and aikuora.project.yml, the operation is idempotent (no duplicate entry is created)"
+    on_failure:
+      - "No dependency is created"
+      - "Developer is informed if the package or target project does not exist"
+      - "If the target project's project_file has no scaffold_tool reference, the operation fails with: 'Cannot determine package manifest for project: no scaffold tool declared'"
+      - "If the scaffold tool's tool_config has no lang attribute, the operation fails with: 'Cannot determine package manifest for project: scaffold tool has no lang declared'"
+
+  TOOL-001:
+    actor: "system"
+    description: >
+      Discover and resolve the effective tool for a given tool name by
+      applying the priority rules: customTools > tools/ > built-in.
+      Tools are discovered from the built-in package, the tools/ directory,
+      and paths listed in customTools in aikuora.workspace.yml. All tools
+      are treated uniformly by their aikuora.tool.yml definition regardless
+      of source.
+    trigger: "Any command that references a tool name (add, list)"
+    pre_conditions:
+      - "A workspace is found by walking up from cwd"
+      - "At least one of: customTools paths, tools/ directory, or built-in registry contains a tool with the given name"
+    result:
+      - "Exactly one tool definition is selected as the effective tool for the given name"
+      - "If a name collision occurs, customTools > tools/ > built-in; the highest-priority source wins"
+    side_effects: []
+    on_failure:
+      - "Tool resolution returns not-found"
+      - "The calling command is aborted and the developer is informed that no tool with the given name exists in any source"
+
+  TOOL-002:
+    actor: "system"
+    description: >
+      Resolve and install the full requires chain for a tool depth-first
+      before applying the target tool.
+    trigger: "ADD-002 or ADD-005 begins applying a tool"
+    pre_conditions:
+      - "The target tool has been resolved by TOOL-001"
+      - "All tools in the requires chain can be resolved by TOOL-001"
+    result:
+      - "Each tool in the requires chain is applied in depth-first order before the target tool"
+      - "No tool in the chain is applied more than once per add operation"
+    side_effects:
+      - "Integration patches from each required tool are applied in the same idempotent manner as direct tool links"
+    on_failure:
+      - "If any tool in the requires chain cannot be resolved, the entire add operation is aborted"
+      - "No changes are made to any project or workspace files"
+      - "Developer is informed which required tool could not be found"
+
+  TOOL-003:
+    actor: "system"
+    description: >
+      Validate the configuration values supplied for a tool link against the
+      tool's declared schema.
+    trigger: "ADD-002 supplies config values for a tool"
+    pre_conditions:
+      - "The tool definition declares a config schema"
+      - "The developer has supplied config values"
+    result:
+      - "All supplied values conform to the tool's declared schema types and constraints"
+    side_effects: []
+    on_failure:
+      - "Validation errors are collected for all invalid fields"
+      - "The tool is not applied"
+      - "Developer is shown the list of invalid fields and the constraint each violates"
+
+  INT-001:
+    actor: "system"
+    description: >
+      Apply a declarative integration patch to a workspace or project file
+      using an idempotent string-check mechanism. If the idempotent_if marker
+      is already present in the target file, the ENTIRE integration is skipped
+      — including VSCode settings, Claude hooks, Moon tasks, and .gitignore patches.
+      WS-001 is a sub-step of INT-001, gated by the idempotency check; it does
+      not run independently on re-apply.
+    trigger: "A tool is linked and declares a declarative integration patch"
+    pre_conditions:
+      - "The target file for the patch is identified"
+      - "The patch has an idempotent_if string defined"
+    result:
+      - "If the idempotent_if string is NOT present in the target file, the patch content is appended or merged into the file; WS-001 is invoked if the patch includes a workspace.vscode block"
+      - "If the idempotent_if string IS already present, no change is made to any file for this integration — the entire integration block (VSCode settings, Claude hooks, Moon tasks, .gitignore) is skipped"
+    side_effects:
+      - "When the patch is applied and includes a workspace.vscode block, WS-001 is triggered to merge VSCode settings"
+    on_failure:
+      - "If the file cannot be read or written, the operation is aborted for this patch"
+      - "Developer is informed which file could not be patched"
+
+  INT-002:
+    actor: "system"
+    description: >
+      Dispatch a JS handler integration to apply tool configuration that
+      requires programmatic logic beyond a declarative patch. JS handlers
+      are responsible for their own workspace integrations; WS-001 is NOT
+      triggered by INT-002.
+    trigger: "A tool is linked and declares a js_handler integration"
+    pre_conditions:
+      - "The tool defines a JS handler function for the integration"
+      - "The handler can be loaded and executed"
+    result:
+      - "The JS handler is invoked with the tool config and workspace context"
+      - "The handler applies its changes to the target file(s)"
+    side_effects:
+      - "The handler is responsible for its own idempotency and its own workspace integrations"
+    on_failure:
+      - "If the handler throws an error, the operation is aborted for this integration"
+      - "Developer is informed of the handler error"
+      - "Changes made by the handler before the error remain (partial state is acceptable)"
+
+  WS-001:
+    actor: "system"
+    description: >
+      Merge VSCode settings contributed by a tool into the workspace
+      .vscode/settings.json file without introducing duplicates and with
+      conflict warnings. WS-001 is only triggered by INT-001 (declarative
+      patches) when the patch includes a workspace.vscode block — it is NOT
+      triggered by INT-002 (JS handlers).
+    trigger: "INT-001 applies a declarative patch that includes a workspace.vscode block"
+    pre_conditions:
+      - "The workspace root is known"
+      - "The idempotency check in INT-001 has confirmed the patch should be applied (idempotent_if string not present)"
+      - ".vscode/settings.json exists or can be created"
+    result:
+      - "New keys contributed by the tool are added to .vscode/settings.json"
+      - "Keys already present with the same value are left unchanged"
+      - "Keys already present with a different value are overwritten with the new value"
+    side_effects:
+      - "A warning is emitted to stderr for each VSCode settings key that was overwritten with a new value"
+    on_failure:
+      - ".vscode/settings.json is not modified"
+      - "Developer is informed of the write error"
+
+  WS-002:
+    actor: "system"
+    description: >
+      Merge Claude hook entries contributed by a tool into the workspace
+      .claude/settings.json hooks configuration without introducing duplicates.
+      Hook objects are compared by their matcher + hooks array content;
+      duplicates are not added.
+    trigger: "INT-001 or INT-002 targets a Claude hooks integration"
+    pre_conditions:
+      - "The workspace root is known"
+      - ".claude/settings.json exists or can be created"
+    result:
+      - "Hook entries contributed by the tool that are not already present (compared by matcher + hooks array content) are added to the hooks array in .claude/settings.json"
+      - "Existing identical hook entries are left unchanged"
+    side_effects: []
+    on_failure:
+      - ".claude/settings.json is not modified"
+      - "Developer is informed of the write error"
+
+  WS-003:
+    actor: "system"
+    description: >
+      Merge Moon inherited task entries contributed by a tool into the
+      workspace Moon configuration without introducing duplicates.
+      Inherited tasks are written to .moon/tasks/<filename>.yml under
+      the tasks: key. The Moon workspace config is at .moon/workspace.yml.
+    trigger: "INT-001 or INT-002 targets a Moon inherited tasks integration"
+    pre_conditions:
+      - "The workspace root is known"
+      - ".moon/workspace.yml exists or can be created"
+      - "The target .moon/tasks/<filename>.yml file exists or can be created"
+    result:
+      - "Task entries contributed by the tool that are not already present are added under the tasks: key in the appropriate .moon/tasks/<filename>.yml file"
+      - "Existing identical task entries are left unchanged"
+    side_effects: []
+    on_failure:
+      - "The Moon task configuration is not modified"
+      - "Developer is informed of the write error"
+
+  WS-004:
+    actor: "system"
+    description: >
+      Merge .gitignore entries contributed by a tool into the workspace or
+      project .gitignore file without introducing duplicates.
+    trigger: "INT-001 or INT-002 targets a gitignore integration"
+    pre_conditions:
+      - "The target .gitignore file path is known"
+      - "The .gitignore file exists or can be created"
+    result:
+      - "Lines contributed by the tool that are not already present in the .gitignore are appended"
+      - "Existing identical lines are left unchanged"
+    side_effects: []
+    on_failure:
+      - "The .gitignore file is not modified"
+      - "Developer is informed of the write error"
+
+  INFO-001:
+    actor: "developer"
+    description: >
+      Display workspace metadata: workspace name, scope, list of all projects
+      with their kinds, tools linked per project, and runtime version pins
+      from .prototools (if the file exists). Root tool installations are not
+      shown as projects.
+    pre_conditions:
+      - "A workspace is found by walking up from cwd"
+    result:
+      - "Workspace name and scope are displayed"
+      - "All projects in the workspace (app, package, module, shareable) are listed with their kind"
+      - "For each project, the list of linked tools is displayed"
+      - "If .prototools exists at the workspace root, runtime version pins are displayed; if .prototools is absent, this section is silently omitted"
+    side_effects: []
+    on_failure:
+      - "Developer is informed that no workspace was found or that the workspace configuration is invalid"
+      - "Exit code 1 is returned"
+
+  LIST-001:
+    actor: "developer"
+    description: >
+      List registered items of a specified type (tools, apps, packages, or
+      modules) within the current workspace, with optional JSON output.
+      Projects are discovered by directory scan (not a registry file).
+      'aikuora list packages' includes shareable config packages.
+      Root tool installations are not listed as projects.
+    pre_conditions:
+      - "A workspace is found by walking up from cwd"
+      - "The type argument is one of: tools, apps, packages, modules"
+    result:
+      - "All discovered items of the requested type are output to stdout"
+      - "For 'packages', all packages including shareable config packages (kind=shareable) are included"
+      - "Root tool installations are excluded from all list output"
+      - "If --json flag is provided, output is a structured JSON array"
+      - "If --json flag is not provided, output is human-readable"
+    side_effects: []
+    on_failure:
+      - "If an invalid type is provided, no output is produced and the developer is informed of the valid types"
+      - "If no workspace is found, exit code 1 is returned and a clear error is shown"
+      - "In --json mode, all errors are emitted as structured JSON and exit code 1 is returned"
+
+# ---------------------------------------------------------------------------
+# Layer 3: Invariants and Tests
+# ---------------------------------------------------------------------------
+
+invariants:
+  integrity:
+    - "Every project belongs to exactly one workspace"
+    - "Every project has exactly one aikuora.project.yml at its root"
+    - "Every tool_config references a tool that exists in the resolved registry"
+    - "Every dependent_integration references an existing shared_config_package and an existing project"
+    - "Every link_variant belongs to exactly one tool"
+    - "A workspace has exactly one workspace_config (aikuora.workspace.yml)"
+    - "The workspace scope format always matches /^@[a-z0-9-]+$/"
+    - "A workspace cannot be nested inside another aikuora workspace"
+    - "Root tool installations (kind=root) never produce an aikuora.project.yml"
+    - "project.name always matches /^[a-z][a-z0-9-]*$/"
+    - "tool.name always matches /^[a-z][a-z0-9-]*$/"
+
+  states:
+    - "A tool kind is always one of: shareable, root, none"
+    - "A project kind is always one of: app, package, module, shareable"
+    - "When a name collision exists across tool sources, customTools always wins over tools/ which always wins over built-in"
+    - "A scaffold target path never exists before a scaffold operation begins"
+    - "Shareable config packages (kind=shareable) are always included in aikuora list packages output"
+    - "A shareable project can only transition to kind=package; transitions to app or module are not allowed"
+
+  temporal:
+    - "The requires chain for a tool is always fully installed before the tool itself is applied"
+    - "Tools in the requires chain are installed in depth-first order"
+    - "STARTUP-001 (workspace config validation) always runs before any command proceeds"
+
+  transactional:
+    - "If any tool in the requires chain cannot be resolved, no changes are made to any file"
+    - "If scaffold template variable resolution fails, no files are written to the target directory"
+    - "VSCode settings key conflict warnings are emitted before the new value is applied, never silently"
+    - "Re-adding an already-linked tool emits a warning (for the top-level requested tool only) before re-applying, never silently"
+    - "Required tools installed transitively via the requires chain never emit a re-link warning"
+    - "All workspace integration patches (VSCode settings, .gitignore, Moon tasks, Claude hooks) are idempotent: if idempotent_if string is present, the ENTIRE integration block is skipped"
+    - "In --json mode, every output is structured JSON and every failure exits with code 1"
+    - "When scaffold cleanup after partial failure also fails, both errors are reported and the partial directory is left in place"
+
+derived_tests:
+  # STARTUP-001 failure: invalid scope
+  - given: "aikuora.workspace.yml exists with scope=INVALID (not matching /^@[a-z0-9-]+$/)"
+    when: "Developer runs any aikuora command"
+    then:
+      - "The command does not execute"
+      - "An error describing the invalid scope field is shown"
+      - "Exit code 1 is returned"
+
+  # STARTUP-001 happy path
+  - given: "aikuora.workspace.yml exists with scope=@acme and name=acme-mono"
+    when: "Developer runs any aikuora command"
+    then:
+      - "Validation passes and the command proceeds normally"
+
+  # STARTUP-001 failure: missing name
+  - given: "aikuora.workspace.yml exists with scope=@acme but name field is absent"
+    when: "Developer runs any aikuora command"
+    then:
+      - "The command does not execute"
+      - "An error stating that the name field is required is shown"
+      - "Exit code 1 is returned"
+
+  # INIT-001 happy path
+  - given: "An empty directory with no aikuora.workspace.yml anywhere in the path"
+    when: "Developer runs aikuora init with scope=@acme and name=acme-mono"
+    then:
+      - "aikuora.workspace.yml is created in the current directory"
+      - "aikuora.workspace.yml contains scope: '@acme' and name: 'acme-mono'"
+
+  # INIT-001 failure: already initialized
+  - given: "A directory that already contains aikuora.workspace.yml"
+    when: "Developer runs aikuora init"
+    then:
+      - "No files are written"
+      - "Developer is informed the workspace already exists"
+
+  # INIT-001 failure: invalid scope
+  - given: "An empty directory with no aikuora.workspace.yml"
+    when: "Developer runs aikuora init with scope=INVALID_SCOPE"
+    then:
+      - "No files are written"
+      - "Developer is informed the scope must match /^@[a-z0-9-]+$/"
+
+  # INIT-001 failure: nested workspace
+  - given: "The current directory is inside a directory that contains an aikuora.workspace.yml"
+    when: "Developer runs aikuora init"
+    then:
+      - "No files are written"
+      - "Developer is informed: 'Cannot initialize workspace inside an existing aikuora workspace at <path>'"
+
+  # ADD-001 happy path
+  - given: "A workspace exists and a scaffold template named 'react-app' exists in the registry"
+    when: "Developer runs aikuora add --name react-app with target path 'apps/my-app' that does not exist"
+    then:
+      - "Directory 'apps/my-app' is created"
+      - "All template files are rendered and written into 'apps/my-app'"
+      - "aikuora.project.yml is present in 'apps/my-app'"
+      - "ADD-002 is automatically invoked for each devtools entry in the scaffold"
+      - "ADD-006 is automatically invoked for each packages entry in the scaffold"
+
+  # ADD-001 failure: target exists
+  - given: "A workspace exists and a scaffold template named 'react-app' exists"
+    when: "Developer runs aikuora add --name react-app with target path 'apps/existing' that already exists"
+    then:
+      - "No files are written"
+      - "Developer is informed the target path already exists"
+
+  # ADD-001 failure: template not found
+  - given: "A workspace exists"
+    when: "Developer runs aikuora add --name nonexistent-template"
+    then:
+      - "No files are written"
+      - "Developer is informed no template named 'nonexistent-template' exists"
+
+  # ADD-001 failure: partial scaffold with cleanup failure
+  - given: "A workspace exists and a scaffold template 'react-app' exists; the scaffold fails midway and the partial directory cannot be deleted"
+    when: "Developer runs aikuora add --name react-app"
+    then:
+      - "Both the original scaffold failure and the cleanup failure are reported"
+      - "The partial directory is left in place"
+      - "Exit code 1 is returned"
+      - "Developer is informed they must manually delete the directory before retrying"
+
+  # ADD-002 happy path (auto-invoked by ADD-001)
+  - given: "A workspace exists, scaffold template 'react-app' declares devtools=['eslint'], tool 'eslint' exists in built-ins, project 'apps/web' has just been scaffolded"
+    when: "ADD-001 auto-triggers ADD-002 for devtools entry 'eslint'"
+    then:
+      - "Tool 'eslint' is recorded in apps/web/aikuora.project.yml"
+      - "All integration patches declared by 'eslint' are applied"
+      - "Moon tasks declared by 'eslint' are added to apps/web Moon config"
+
+  # ADD-002 failure: tool not found (auto-invoked context)
+  - given: "A workspace exists, scaffold auto-triggers ADD-002 for devtools entry 'nonexistent-tool'"
+    when: "ADD-001 auto-triggers ADD-002 for devtools entry 'nonexistent-tool'"
+    then:
+      - "No changes are made to any file"
+      - "Developer is informed the tool does not exist in the registry"
+
+  # ADD-002 edge case: re-add same tool (top-level only warning)
+  - given: "A workspace exists and tool 'eslint' is already linked to project 'apps/web'"
+    when: "ADD-001 auto-triggers ADD-002 for 'eslint' against 'apps/web' again"
+    then:
+      - "A warning is emitted informing the developer that 'eslint' was already linked"
+      - "The tool configuration is re-applied"
+      - "No duplicate entry is created in aikuora.project.yml"
+
+  # ADD-002 edge case: required tool already linked — no warning
+  - given: "Tool 'eslint' requires 'base-lint'; 'base-lint' is already linked to project 'apps/web'; 'eslint' is not yet linked"
+    when: "ADD-002 is invoked for 'eslint' against 'apps/web'"
+    then:
+      - "No re-link warning is emitted for 'base-lint'"
+      - "'eslint' is linked and its integration patches are applied"
+      - "'base-lint' integration patches are re-applied idempotently without warning"
+
+  # ADD-002 failure: variant required but not provided
+  - given: "A workspace exists, tool 'lint' declares variants ['react', 'vue'], scaffold devtools entry for 'lint' provides no variant"
+    when: "ADD-002 is auto-triggered for 'lint' with no variant"
+    then:
+      - "No changes are made"
+      - "Developer is informed a variant is required and the available variants are listed"
+      - "Exit code 1 is returned"
+
+  # ADD-003 happy path
+  - given: "A workspace exists with scope @acme"
+    when: "Developer runs aikuora add with kind=shareable and name=eslint-config"
+    then:
+      - "A new directory for the shareable package is created under packages/configs/"
+      - "aikuora.project.yml with kind=shareable is present in the new directory"
+
+  # ADD-003 failure: name conflict
+  - given: "A workspace exists and a project named 'eslint-config' already exists"
+    when: "Developer runs aikuora add with kind=shareable and name=eslint-config"
+    then:
+      - "No files are written"
+      - "Developer is informed the name conflicts with an existing project"
+
+  # ADD-003 failure: partial creation with cleanup failure
+  - given: "A workspace exists, a shareable tool 'eslint-config' is being created, the operation fails midway and the partial directory cannot be deleted"
+    when: "Developer runs aikuora add eslint-config (kind=shareable)"
+    then:
+      - "Both the original failure and the cleanup failure are reported"
+      - "The partial directory is left in place"
+      - "Exit code 1 is returned"
+      - "Developer is told to manually delete the directory before retrying"
+
+  # ADD-004 happy path
+  - given: "A workspace exists and a tool with kind=root named 'root-config' exists in the registry"
+    when: "Developer runs aikuora add root-config (no target)"
+    then:
+      - "The root tool's configuration and integration patches are applied at workspace level"
+      - "No aikuora.project.yml is created"
+      - "No new project appears in aikuora list output"
+
+  # ADD-004 failure: tool not found in registry
+  - given: "A workspace exists and no tool named 'nonexistent-root' exists in the registry"
+    when: "Developer runs aikuora add nonexistent-root (no target)"
+    then:
+      - "No files are written"
+      - "Developer is informed the tool does not exist in the registry"
+      - "Exit code 1 is returned"
+
+  # ADD-005 happy path
+  - given: "A workspace exists, built-in tool 'prettier' exists (not listed in customTools), tools/prettier/ does not yet exist"
+    when: "Developer runs aikuora add prettier --local"
+    then:
+      - "The built-in 'prettier' tool directory is copied into tools/prettier/ at the workspace root"
+      - "The local fork at tools/prettier/ now takes priority over the built-in 'prettier' for all resolutions in this workspace"
+
+  # ADD-005 failure: tool not in built-ins
+  - given: "A workspace exists and 'custom-only-tool' exists only in customTools (not in the built-in registry)"
+    when: "Developer runs aikuora add custom-only-tool --local"
+    then:
+      - "No files are copied"
+      - "Developer is informed the tool does not exist in the built-in registry"
+
+  # ADD-005 edge case: local fork already exists
+  - given: "A workspace exists and tools/prettier/ already exists (a local fork is already present)"
+    when: "Developer runs aikuora add prettier --local"
+    then:
+      - "No files are copied"
+      - "Developer is informed a local fork of 'prettier' already exists at tools/prettier/"
+
+  # ADD-005 edge case: tool name does not exist at all
+  - given: "A workspace exists and no tool named 'nonexistent' exists in any source"
+    when: "Developer runs aikuora add nonexistent --local"
+    then:
+      - "No files are copied"
+      - "Developer is informed: 'Tool \"nonexistent\" not found in registry'"
+      - "Exit code 1 is returned"
+
+  # ADD-006 happy path (node) — auto-invoked by ADD-001
+  - given: "A workspace exists, shared_config_package 'packages/eslint-config' exists, project 'apps/web' has just been scaffolded with scaffold_tool='react-app', and 'react-app' tool declares lang=node"
+    when: "ADD-001 auto-triggers ADD-006 for packages entry 'packages/eslint-config' against 'apps/web'"
+    then:
+      - "A dependent_integration entry linking apps/web to packages/eslint-config is added to apps/web/aikuora.project.yml under the dependencies list"
+      - "apps/web/package.json is updated to include packages/eslint-config as a dependency at workspace:* version"
+
+  # ADD-006 happy path (python) — auto-invoked by ADD-001
+  - given: "A workspace exists, shared_config_package 'packages/lint-config' exists, project 'services/api' has just been scaffolded with scaffold_tool='fastapi', and 'fastapi' tool declares lang=python"
+    when: "ADD-001 auto-triggers ADD-006 for packages entry 'packages/lint-config' against 'services/api'"
+    then:
+      - "A dependent_integration entry is added to services/api/aikuora.project.yml under the dependencies list"
+      - "services/api/pyproject.toml is updated to include the dependency"
+
+  # ADD-006 edge case: dependency already exists
+  - given: "apps/web already depends on packages/eslint-config (in both package.json and aikuora.project.yml)"
+    when: "ADD-001 auto-triggers ADD-006 for packages/eslint-config against apps/web again"
+    then:
+      - "No duplicate dependency entry is created in package.json or aikuora.project.yml"
+      - "The operation completes without error"
+
+  # ADD-006 failure: package not found
+  - given: "A workspace exists and project 'apps/web' exists but 'packages/nonexistent' does not"
+    when: "ADD-001 auto-triggers ADD-006 for packages/nonexistent against apps/web"
+    then:
+      - "No dependency is created"
+      - "Developer is informed the package does not exist"
+
+  # ADD-006 failure: no scaffold_tool in project_file
+  - given: "A workspace exists, shared_config_package 'packages/eslint-config' exists, project 'apps/web' exists but its aikuora.project.yml has no scaffold_tool reference"
+    when: "ADD-006 is invoked for packages/eslint-config against apps/web"
+    then:
+      - "No dependency is created"
+      - "Developer is informed: 'Cannot determine package manifest for project: no scaffold tool declared'"
+      - "Exit code 1 is returned"
+
+  # ADD-006 failure: scaffold tool has no lang
+  - given: "A workspace exists, shared_config_package 'packages/eslint-config' exists, project 'apps/web' exists with scaffold_tool='bare-tool', and 'bare-tool' declares no lang attribute"
+    when: "ADD-006 is invoked for packages/eslint-config against apps/web"
+    then:
+      - "No dependency is created"
+      - "Developer is informed: 'Cannot determine package manifest for project: scaffold tool has no lang declared'"
+      - "Exit code 1 is returned"
+
+  # G-M-002: bare add with tool name that does not exist in registry
+  - given: "A workspace exists and no tool named 'unknown-tool' exists in any source"
+    when: "Developer runs aikuora add unknown-tool (no flags, no target)"
+    then:
+      - "No changes are made"
+      - "Developer is informed: 'Tool \"unknown-tool\" not found in registry'"
+      - "Exit code 1 is returned"
+
+  # TOOL-001 priority resolution
+  - given: "A tool named 'lint' exists as built-in and also as a custom tool listed in customTools"
+    when: "System resolves tool 'lint'"
+    then:
+      - "The custom tool definition is selected"
+      - "The built-in 'lint' definition is not used"
+
+  # TOOL-001 failure: not found
+  - given: "No tool named 'unknown-tool' exists in any source"
+    when: "System resolves tool 'unknown-tool'"
+    then:
+      - "Resolution returns not-found"
+      - "The calling command is aborted and the developer is informed"
+
+  # TOOL-001 edge case: tools/ shadows built-in
+  - given: "A tool named 'prettier' exists as built-in and also in the tools/ directory"
+    when: "System resolves tool 'prettier'"
+    then:
+      - "The tools/ definition is selected"
+      - "The built-in 'prettier' definition is not used"
+
+  # TOOL-002 happy path
+  - given: "Tool 'typecheck' requires 'tsc' which requires 'node-base'"
+    when: "Developer runs aikuora add typecheck apps/api"
+    then:
+      - "'node-base' is applied first"
+      - "'tsc' is applied second"
+      - "'typecheck' is applied third"
+
+  # TOOL-002 failure: broken requires chain
+  - given: "Tool 'typecheck' requires 'missing-tool' which does not exist"
+    when: "Developer runs aikuora add typecheck apps/api"
+    then:
+      - "No changes are made to any file"
+      - "Developer is informed that 'missing-tool' in the requires chain could not be found"
+
+  # TOOL-002 edge case: same tool appears multiple times in chain
+  - given: "Tool 'a' requires 'base' and tool 'b' also requires 'base', and 'c' requires both 'a' and 'b'"
+    when: "Developer runs aikuora add c apps/api"
+    then:
+      - "'base' is applied exactly once"
+      - "'a' and 'b' are applied once each"
+      - "'c' is applied last"
+
+  # TOOL-003 failure: invalid config
+  - given: "Tool 'vite' declares a required config field 'port' of type integer"
+    when: "Developer links 'vite' to a project supplying port='not-a-number'"
+    then:
+      - "The tool is not applied"
+      - "Developer is shown that 'port' must be an integer"
+
+  # INT-001 idempotency: entire integration skipped
+  - given: "The idempotent_if string for an ESLint patch is already present in .vscode/settings.json"
+    when: "System applies the ESLint declarative integration patch"
+    then:
+      - ".vscode/settings.json is not modified"
+      - "Claude hooks, Moon tasks, and .gitignore patches for this integration are also skipped"
+
+  # INT-001 happy path
+  - given: "The idempotent_if string for an ESLint patch is NOT present in .vscode/settings.json"
+    when: "System applies the ESLint declarative integration patch"
+    then:
+      - "The ESLint patch content is merged into .vscode/settings.json"
+      - "WS-001 is triggered to merge the VSCode settings block"
+
+  # INT-002 failure: handler error
+  - given: "A tool declares a JS handler integration and the handler throws an error mid-execution"
+    when: "System dispatches the JS handler integration"
+    then:
+      - "The integration is aborted"
+      - "Developer is informed of the handler error"
+      - "WS-001 is not triggered (JS handlers manage their own workspace integrations)"
+
+  # WS-001 conflict warning
+  - given: ".vscode/settings.json contains 'editor.tabSize: 2' and the tool contributes 'editor.tabSize: 4'"
+    when: "System merges the tool's VSCode settings (triggered by INT-001)"
+    then:
+      - "editor.tabSize is set to 4 in .vscode/settings.json"
+      - "A warning is emitted to stderr noting the key conflict for 'editor.tabSize'"
+
+  # WS-001 no-op: same value
+  - given: ".vscode/settings.json contains 'editor.tabSize: 4' and the tool also contributes 'editor.tabSize: 4'"
+    when: "System merges the tool's VSCode settings"
+    then:
+      - "editor.tabSize remains 4 in .vscode/settings.json"
+      - "No warning is emitted"
+
+  # WS-002 idempotency: Claude hooks
+  - given: ".claude/settings.json already contains a hook with the same matcher and hooks array content"
+    when: "System applies a Claude hooks integration"
+    then:
+      - "No duplicate hook object is added to .claude/settings.json"
+
+  # WS-003 idempotency
+  - given: "The .moon/tasks/<filename>.yml already contains task 'lint' under the tasks: key"
+    when: "System applies a Moon inherited tasks patch that includes 'lint'"
+    then:
+      - "The Moon task file still contains 'lint' exactly once"
+
+  # WS-004 idempotency
+  - given: ".gitignore already contains 'node_modules'"
+    when: "System applies a gitignore patch that includes 'node_modules'"
+    then:
+      - ".gitignore still contains 'node_modules' exactly once"
+
+  # INFO-001 happy path with .prototools
+  - given: "A workspace with name='acme-mono', scope='@acme', two projects (apps/web kind=app, packages/ui kind=package), .prototools at workspace root defining node = \"22.0.0\""
+    when: "Developer runs aikuora info"
+    then:
+      - "Workspace name 'acme-mono' and scope '@acme' are displayed"
+      - "Both projects are listed with their kinds and linked tools"
+      - "Runtime pin 'node = \"22.0.0\"' from .prototools is displayed"
+
+  # INFO-001 happy path without .prototools
+  - given: "A workspace exists with projects but no .prototools file at the workspace root"
+    when: "Developer runs aikuora info"
+    then:
+      - "Workspace name and scope are displayed"
+      - "Projects and their linked tools are displayed"
+      - "The runtime version pins section is silently omitted"
+
+  # INFO-001: root installs not shown
+  - given: "A workspace exists with a root tool installation and a regular app project"
+    when: "Developer runs aikuora info"
+    then:
+      - "The regular app project is listed"
+      - "The root tool installation is not listed as a project"
+
+  # INFO-001 failure: no workspace
+  - given: "No aikuora.workspace.yml exists in the current directory or any parent"
+    when: "Developer runs aikuora info"
+    then:
+      - "A clear error is shown stating no workspace was found"
+      - "Exit code 1 is returned"
+
+  # LIST-001 happy path with --json
+  - given: "A workspace exists with three tools registered: 'eslint', 'prettier', 'vite'"
+    when: "Developer runs aikuora list tools --json"
+    then:
+      - "Output is a valid JSON array containing entries for 'eslint', 'prettier', and 'vite'"
+      - "Exit code 0 is returned"
+
+  # LIST-001 happy path without --json
+  - given: "A workspace exists with two apps: 'apps/web' and 'apps/admin'"
+    when: "Developer runs aikuora list apps"
+    then:
+      - "Human-readable output listing 'apps/web' and 'apps/admin' is printed"
+      - "Exit code 0 is returned"
+
+  # LIST-001 packages includes shareables
+  - given: "A workspace exists with a regular package 'packages/ui' (kind=package) and a shareable 'packages/configs/eslint-config' (kind=shareable)"
+    when: "Developer runs aikuora list packages"
+    then:
+      - "Both 'packages/ui' and 'packages/configs/eslint-config' appear in the output"
+      - "Root tool installations are not listed"
+
+  # LIST-001 failure: invalid type
+  - given: "A workspace exists"
+    when: "Developer runs aikuora list unknown-type"
+    then:
+      - "No output is produced"
+      - "Developer is informed the valid types are: tools, apps, packages, modules"
+
+  # LIST-001 failure in --json mode: no workspace
+  - given: "No aikuora.workspace.yml exists in the current directory or any parent"
+    when: "Developer runs aikuora list tools --json"
+    then:
+      - "Output is a structured JSON error object"
+      - "Exit code 1 is returned"
+
+# ---------------------------------------------------------------------------
+# Metadata
+# ---------------------------------------------------------------------------
+
+metadata:
+  version: "1.0.0"
+  created: "2026-02-22T00:00:00Z"
+  last_modified: "2026-02-22"
+  last_verified: "2026-02-22"
+  verification_status: "verified"
+
+  quality_attributes:
+    concurrent_users: "Single developer per terminal session; no concurrency requirements"
+    response_time: "Under 2 seconds for all commands in a typical workspace"
+    data_durability: "Workspace and project config files must never be silently corrupted; partial writes must be avoided"
+    maintainers: "TypeScript engineers familiar with Node.js CLI tooling"
+    change_frequency: "New tools and scaffold templates added frequently; core command contracts change rarely"
+
+  technical_constraints:
+    platform: "CLI"
+    technology_mandates:
+      - "Node.js 24+"
+      - "TypeScript 5"
+      - "pnpm 10"
+      - "meow (CLI argument parsing)"
+      - "ink + React 18 (terminal UI rendering)"
+      - "Handlebars (scaffold template rendering)"
+      - "Zod (config schema validation)"
+      - "yaml (YAML parsing and serialization)"
+      - "fs-extra (file system operations)"
+      - "tsup (build bundler)"
+      - "vitest (test runner)"
+    integrations:
+      - "moonrepo (workspace task runner target; workspace config at .moon/workspace.yml; inherited tasks at .moon/tasks/<filename>.yml under the tasks: key)"
+      - "prototools (runtime version pin target; .prototools at workspace root in TOML key=value format)"
+      - "VSCode (.vscode/settings.json at workspace root)"
+      - "Claude (.claude/settings.json at workspace root; hooks array merged by matcher + hooks array content)"
+    regulations: []
+    timeline: ""
+    team_expertise: "TypeScript, Node.js, monorepo tooling (moonrepo, pnpm workspaces)"
+
+  uncertainty_log:
+    - item: "Web UI graph for aikuora info command"
+      context: >
+        The future vision for aikuora info includes a web-based graph
+        visualization of workspace structure and tool relationships. This is
+        not a current behavior and has no defined requirements yet.
+      status: "deferred"
+    - item: "Post-scaffold explicit tool addition to existing projects (direct developer invocation of link mode — aikuora add <tool> <target>)"
+      context: >
+        In v1, ADD-002 (link mode) is triggered only automatically by ADD-001
+        (scaffold) when processing devtools entries. Direct developer invocation
+        of link mode after a project already exists is not implemented. This
+        is deferred to a future version. Any attempt by a developer to run
+        aikuora add <tool> <target> directly should be handled when this
+        feature is implemented.
+      status: "deferred"
+    - item: "Direct package dependency wiring (aikuora add <pkg> <target>) — developer-invoked ADD-006"
+      context: >
+        In v1, ADD-006 (project dependency mode) is triggered only automatically
+        by ADD-001 (scaffold) when processing packages entries. Direct developer
+        invocation of aikuora add <pkg> <target> to wire a shared_config_package
+        dependency into an existing project is not implemented in v1. This is
+        deferred to a future version.
+      status: "deferred"

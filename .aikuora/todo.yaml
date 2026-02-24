@@ -1,0 +1,489 @@
+project: "aikuora CLI"
+spec: ".aikuora/spec.yaml"
+current_phase: 0
+
+phases:
+  - id: 0
+    name: "Code Optimization & Simplification"
+    status: pending
+    tasks:
+      - id: P0-01
+        title: "Extract readJsonFile helper to eliminate duplicated JSON read pattern"
+        spec_ref: null
+        status: pending
+        note: >
+          In src/commands/add.tsx the pattern
+          `existsSync(p) ? JSON.parse(readFileSync(p, 'utf-8')) as T : {}` appears
+          five times: patchTsconfigPaths, patchTsconfigReferences, ensureRootPeerDeps,
+          mergeJsonFile, and ensureConfigsEntry. Extract a typed helper
+          `function readJsonFile<T extends Record<string, unknown>>(p: string): T`
+          into src/utils/json-file.ts (or as a private top-level function in add.tsx).
+          Replace all five call-sites. No behavior change.
+        files:
+          - "src/commands/add.tsx"
+
+      - id: P0-02
+        title: "Extract loadResolvedTool helper to eliminate tool-resolution boilerplate"
+        spec_ref: null
+        status: pending
+        note: >
+          In src/commands/add.tsx the triplet
+          scanAllTools → resolveTool → loadToolConfig with three separate error
+          checks is copy-pasted identically in runRoot, runScaffold, runShareable,
+          and runLink (four copies). Extract a private helper
+          `async function loadResolvedTool(toolName, projectRoot, customPaths, json, mode, silent?)`
+          that returns `{ success: false } | { success: true, discovered, toolConfig, tools }`.
+          Replace all four call-sites. No behavior change.
+        files:
+          - "src/commands/add.tsx"
+
+      - id: P0-03
+        title: "Move mid-file import statements to top of add.tsx"
+        spec_ref: null
+        status: pending
+        note: >
+          In src/commands/add.tsx, `import type { Config }` (line 544) and
+          `import type { WorkspaceConfig }` (line 545) appear in the middle of the
+          file, between function bodies. ESM convention and the project's import
+          ordering rule require all imports at the top. Move both imports to the
+          import block at lines 1-21. No behavior change.
+        files:
+          - "src/commands/add.tsx"
+
+      - id: P0-04
+        title: "Fix scanCustomTools — use basename instead of dirname for tool name"
+        spec_ref: null
+        status: pending
+        note: >
+          In src/core/scanner.ts line 106, scanCustomTools() derives the tool name
+          with `dirname(absolutePath).split('/').pop()`. dirname('/path/to/mytool')
+          returns '/path/to', whose last segment is 'to', not 'mytool'. The correct
+          fix is `basename(absolutePath)`, which is already imported on line 2.
+          Remove the .split('/').pop() chain and replace with a single basename call.
+          Note: basename is already imported. This is a pure simplification — the
+          bug fix itself is tracked in P1-03 (spec alignment phase); this task
+          covers the readability/correctness improvement independently.
+        files:
+          - "src/core/scanner.ts"
+
+      - id: P0-05
+        title: "Eliminate duplicate readConfig call in addCommand dispatcher"
+        spec_ref: null
+        status: pending
+        note: >
+          In src/commands/add.tsx, addCommand() calls readConfig() twice: once at
+          line 1105 for the `if (target)` branch, and again at line 1127 for the
+          'no target, no name' branch. Hoist a single readConfig() call to the top
+          of addCommand (after the early returns for local/name), then pass the
+          already-read config into both branches. For the `if (target)` branch,
+          pass the customPaths from the hoisted result; for the 'bare add' branch,
+          reuse the already-read allTools. No behavior change.
+        files:
+          - "src/commands/add.tsx"
+
+      - id: P0-06
+        title: "Extract MoonTaskEntry builder to eliminate task-building duplication in moon.ts"
+        spec_ref: null
+        status: pending
+        note: >
+          In src/utils/moon.ts the same task-to-entry conversion is copy-pasted in
+          three places: buildMoonConfig (lines 31-35), addMoonTask (lines 76-80),
+          and addInheritedMoonTasks (lines 166-170). Extract a private helper
+          `function taskToEntry(task: MoonTask): MoonTaskEntry` that builds the
+          MoonTaskEntry object from a MoonTask, including conditional assignment
+          of args, inputs, outputs, and options. Replace all three call-sites.
+          No behavior change.
+        files:
+          - "src/utils/moon.ts"
+
+      - id: P0-07
+        title: "Fix getTemplatesPath to use same two-level detection as getBuiltInToolsPath"
+        spec_ref: null
+        status: pending
+        note: >
+          In src/utils/template.ts, getTemplatesPath() resolves the CLI root with
+          `resolve(dirname(currentFilePath), '../')` — one level up. In the bundled
+          output (dist/index.js) the file is one level below the CLI root, so this
+          works. But in dev/test (src/utils/template.ts) the file is two levels
+          below the CLI root, so the path is wrong. The correct implementation
+          mirrors getBuiltInToolsPath in src/core/scanner.ts: check whether
+          basename(dirname(currentFilePath)) === 'dist' and go one or two levels up
+          accordingly. Update getTemplatesPath to use this check. No behavior change
+          in production; fixes dev/test path resolution.
+        files:
+          - "src/utils/template.ts"
+          - "src/core/scanner.ts"
+
+      - id: P0-08
+        title: "Remove dead customizable check documentation inconsistency in runLocal"
+        spec_ref: null
+        status: pending
+        note: >
+          In src/commands/add.tsx, runLocal() checks `toolConfig.customizable`
+          (line 967) and returns an error if false. The AddOptions interface JSDoc
+          says `--local` is for forking built-in tools with no mention of
+          customizable. The toolConfigSchema still declares customizable as a field
+          (default false), making every built-in tool reject --local unless the
+          field is explicitly set. While full removal of the customizable gate is
+          tracked in P1-04 (spec alignment), this task: (1) adds a TODO comment
+          on the customizable check citing P1-04, (2) updates the AddOptions JSDoc
+          to accurately reflect current behavior, and (3) removes the `local` mode
+          label from AddCommand props that incorrectly says 'install' as fallback
+          for the 'bare add' case (line 148 in index.tsx). No behavior change.
+        files:
+          - "src/commands/add.tsx"
+          - "src/index.tsx"
+
+  - id: 1
+    name: "Spec Alignment Fixes"
+    status: pending
+    tasks:
+      - id: P1-01
+        title: "Align configSchema — move name/scope to top level (ADR-004)"
+        spec_ref: "behaviors.STARTUP-001"
+        status: pending
+        note: >
+          Update src/types/config.ts: remove the `project` sub-object; add
+          top-level `name: z.string().min(1)` and
+          `scope: z.string().regex(/^@[a-z0-9-]+$/)`. Update
+          src/managers/config.ts createDefaultConfig accordingly.
+          Update all callsites: rootConfig.project.name → rootConfig.name,
+          rootConfig.project.scope → rootConfig.scope.
+          Verify templates/init/aikuora.workspace.yml.hbs emits top-level fields.
+        files:
+          - "src/types/config.ts"
+          - "src/managers/config.ts"
+          - "src/commands/add.tsx"
+          - "src/commands/init.tsx"
+          - "templates/init/aikuora.workspace.yml.hbs"
+
+      - id: P1-02
+        title: "Update projectFileSchema — add shareable kind, name, scaffold_tool, tools, dependencies"
+        spec_ref: "behaviors.ADD-001"
+        status: pending
+        note: >
+          Update src/types/project.ts: add `kind: z.enum(['app','package','module','shareable'])`,
+          add `name: z.string()`, rename `tool` to `scaffold_tool` (or add `scaffold_tool`
+          alongside `tool` for backward compat), rename `type` to `kind`.
+          Update all callsites in src/utils/project-file.ts and src/commands/add.tsx.
+          The `tools` list replaces `dependencies.tools`; `dependencies` list replaces
+          `dependencies.projects`. Align with spec project_file entity attributes.
+        files:
+          - "src/types/project.ts"
+          - "src/utils/project-file.ts"
+          - "src/commands/add.tsx"
+
+      - id: P1-03
+        title: "Fix scanCustomTools — use basename not dirname for tool name"
+        spec_ref: "behaviors.TOOL-001"
+        status: pending
+        note: >
+          In src/core/scanner.ts, scanCustomTools() uses
+          `dirname(absolutePath).split('/').pop()` to derive the tool name.
+          This is wrong — it returns the parent directory name, not the tool
+          directory name. Fix to use `basename(absolutePath)`.
+        files:
+          - "src/core/scanner.ts"
+
+      - id: P1-04
+        title: "Fix runLocal — remove customizable gate; any built-in tool can be forked"
+        spec_ref: "behaviors.ADD-005"
+        status: pending
+        note: >
+          In src/commands/add.tsx, runLocal() checks `toolConfig.customizable`
+          before allowing the fork. Spec says any built-in tool can be forked
+          via --local. Remove the customizable check. Keep the check that the
+          tool exists in scanBuiltInTools() only (not in customTools or project tools).
+          Update error message to match spec: "Tool '<name>' not found in
+          built-in registry".
+        files:
+          - "src/commands/add.tsx"
+
+      - id: P1-05
+        title: "Implement INIT-001 nested workspace prevention"
+        spec_ref: "behaviors.INIT-001"
+        status: pending
+        note: >
+          In src/commands/init.tsx, before writing any files, call
+          findConfigPath(cwd). If it returns a non-null path, abort with:
+          "Cannot initialize workspace inside an existing aikuora workspace at <path>".
+          Also add validation: if scope format does not match /^@[a-z0-9-]+$/,
+          abort with a clear error (no files written).
+        files:
+          - "src/commands/init.tsx"
+          - "src/managers/config.ts"
+
+      - id: P1-06
+        title: "Implement variant required error in runLink (ADD-002)"
+        spec_ref: "behaviors.ADD-002"
+        status: pending
+        note: >
+          In src/commands/add.tsx runLink(): when link.variants is non-empty and
+          no --variant flag is given, check if any variant has `default: true`.
+          If yes, use it silently. If no, emit error:
+          "Tool '<name>' requires a variant. Available variants: <v1>, <v2>, ..."
+          and return { success: false } with exit code 1.
+        files:
+          - "src/commands/add.tsx"
+
+      - id: P1-07
+        title: "Implement re-link warning in runLink (ADD-002 side_effects)"
+        spec_ref: "behaviors.ADD-002"
+        status: pending
+        note: >
+          In src/commands/add.tsx runLink(): read the existing project file before
+          applying. If the top-level toolName already appears in project.tools
+          (or dependencies.tools in current schema), emit a warning to stderr:
+          "Warning: tool '<name>' is already linked to this project. Re-applying."
+          Do NOT emit this warning for transitive required tools (silent=true path).
+        files:
+          - "src/commands/add.tsx"
+
+      - id: P1-08
+        title: "Implement VSCode key conflict warning in mergeVscodeSettings (WS-001)"
+        spec_ref: "behaviors.WS-001"
+        status: pending
+        note: >
+          Create a new mergeVscodeSettings(filePath, patch) function in
+          src/commands/add.tsx (or extract to src/utils/workspace-integrations.ts).
+          For each incoming key, if it already exists in settings.json with a
+          different value, emit to process.stderr:
+          "Warning: VSCode setting '<key>' overwritten (was: <old>, now: <new>)".
+          Then apply the new value. Replace all calls to mergeJsonFile for
+          .vscode/settings.json with mergeVscodeSettings.
+        files:
+          - "src/commands/add.tsx"
+
+      - id: P1-09
+        title: "Implement scaffold cleanup on partial failure (ADD-001, ADD-003)"
+        spec_ref: "behaviors.ADD-001"
+        status: pending
+        note: >
+          In src/commands/add.tsx runScaffold() and runShareable():
+          Wrap the body in try/catch. On failure after targetDir was created,
+          attempt fse.remove(targetDir). If cleanup also fails, report both
+          errors and include the partial path. In JSON mode: emit
+          { success: false, error, cleanupError, manualCleanupRequired: true,
+          partialPath }. In human mode: show both error messages and instruct
+          the user to manually delete the directory.
+        files:
+          - "src/commands/add.tsx"
+
+      - id: P1-10
+        title: "Fix bare add with nonexistent tool — return 'Tool not found in registry'"
+        spec_ref: "behaviors.TOOL-001"
+        status: pending
+        note: >
+          In src/commands/add.tsx addCommand(): when no target, no name, no local
+          flag AND the tool is not found (discovered is null), the current code
+          falls through to "Ambiguous usage" error. Fix to: if resolveTool
+          returns null at this point, return error "Tool '<name>' not found in
+          registry" with exit code 1.
+        files:
+          - "src/commands/add.tsx"
+
+  - id: 2
+    name: "STARTUP-001 Workspace Validation Guard"
+    status: pending
+    tasks:
+      - id: P2-01
+        title: "Create validateWorkspace utility (STARTUP-001)"
+        spec_ref: "behaviors.STARTUP-001"
+        status: pending
+        note: >
+          Create src/utils/workspace.ts with validateWorkspace(cwd?) function.
+          It: (1) calls findConfigPath(cwd) from src/managers/config.ts,
+          (2) reads and parses the file, (3) validates name (required, non-empty)
+          and scope (required, /^@[a-z0-9-]+$/), (4) returns
+          { valid: true, config: Config } or { valid: false, error: string }.
+          Error messages name the specific invalid field.
+          Write unit tests in src/utils/workspace.test.ts covering spec
+          derived_tests for STARTUP-001.
+        files:
+          - "src/utils/workspace.ts"
+          - "src/utils/workspace.test.ts"
+
+      - id: P2-02
+        title: "Wire validateWorkspace into all commands (STARTUP-001)"
+        spec_ref: "behaviors.STARTUP-001"
+        status: pending
+        depends_on: ["P2-01", "P1-01"]
+        note: >
+          Update src/commands/add.tsx and src/commands/init.tsx (init is exempt).
+          Each command's async function calls validateWorkspace(cwd) as the first
+          step. If invalid, emit error and return { success: false }. This replaces
+          the current readConfig() call at the top of each mode function.
+          Wire into src/index.tsx for the info and list commands too once created.
+        files:
+          - "src/commands/add.tsx"
+          - "src/index.tsx"
+
+  - id: 3
+    name: "New Commands: info and list"
+    status: pending
+    tasks:
+      - id: P3-01
+        title: "Create project scanner utility (used by INFO-001 and LIST-001)"
+        spec_ref: "behaviors.INFO-001"
+        status: pending
+        depends_on: ["P1-02"]
+        note: >
+          Create src/utils/project-scanner.ts with scanProjects(workspaceRoot, structure).
+          It walks structure.apps, structure.packages, structure.modules directories,
+          finds subdirectories containing an aikuora.project.yml, reads each file,
+          and returns ScannedProject[] = { path: string (relative to workspace root),
+          absPath: string, projectFile: ProjectFile }[].
+          Directories without an aikuora.project.yml are silently skipped.
+          Root tool installations (no aikuora.project.yml) are naturally excluded.
+          Include kind=shareable in results (used by list packages).
+          Write unit tests in src/utils/project-scanner.test.ts.
+        files:
+          - "src/utils/project-scanner.ts"
+          - "src/utils/project-scanner.test.ts"
+
+      - id: P3-02
+        title: "Implement aikuora info command (INFO-001)"
+        spec_ref: "behaviors.INFO-001"
+        status: pending
+        depends_on: ["P2-01", "P3-01"]
+        note: >
+          Create src/commands/info.tsx with infoCommand(options) and InfoCommand component.
+          Output: workspace name, scope, all projects with kind and linked tools,
+          runtime pins from .prototools (if file exists; omit section if absent).
+          Root tool installations (no aikuora.project.yml) are not shown.
+          JSON output shape: { action: 'info', success: true, workspace: { name, scope },
+          projects: [{ path, kind, tools: string[] }], runtimePins?: Record<string,string> }.
+          Wire into src/index.tsx for the info command.
+          Write tests covering: with prototools, without prototools, root install excluded.
+        files:
+          - "src/commands/info.tsx"
+          - "src/commands/info.test.ts"
+          - "src/index.tsx"
+
+      - id: P3-03
+        title: "Implement aikuora list command (LIST-001)"
+        spec_ref: "behaviors.LIST-001"
+        status: pending
+        depends_on: ["P2-01", "P3-01"]
+        note: >
+          Create src/commands/list.tsx with listCommand(options) and ListCommand component.
+          Type argument values: tools, apps, packages, modules.
+          For tools: return all entries from scanAllTools(projectRoot, config.customTools).
+          For apps: return scanned projects with kind=app.
+          For packages: return scanned projects with kind=package OR kind=shareable.
+          For modules: return scanned projects with kind=module.
+          Invalid type: emit error "Valid types are: tools, apps, packages, modules", exit 1.
+          JSON output: { action: 'list', success: true, type, items: [...] }.
+          In --json mode, errors are structured JSON with exit code 1.
+          Wire into src/index.tsx. Wire the 'type' positional arg from cli.input[1].
+          Write tests covering: valid types, invalid type, packages includes shareable,
+          root installs excluded, no workspace error in --json mode.
+        files:
+          - "src/commands/list.tsx"
+          - "src/commands/list.test.ts"
+          - "src/index.tsx"
+
+  - id: 4
+    name: "Polish and Hardening"
+    status: pending
+    tasks:
+      - id: P4-01
+        title: "Add STARTUP-001 tests (spec derived_tests coverage)"
+        spec_ref: "behaviors.STARTUP-001"
+        status: pending
+        depends_on: ["P2-01"]
+        note: >
+          Add tests to src/utils/workspace.test.ts covering all three derived_tests
+          for STARTUP-001: invalid scope, valid config, missing name.
+          These should be unit tests using a temp directory with a real
+          aikuora.workspace.yml file written to it.
+        files:
+          - "src/utils/workspace.test.ts"
+
+      - id: P4-02
+        title: "Add INIT-001 nested workspace test (spec derived_tests coverage)"
+        spec_ref: "behaviors.INIT-001"
+        status: pending
+        depends_on: ["P1-05"]
+        note: >
+          Add a test to src/commands/init.test.ts (create if not exists) for the
+          nested workspace scenario: create a parent dir with aikuora.workspace.yml,
+          run initCommand in a child dir, expect failure with the spec-required
+          error message "Cannot initialize workspace inside an existing aikuora
+          workspace at <path>".
+        files:
+          - "src/commands/init.test.ts"
+
+      - id: P4-03
+        title: "Add ADD-002 variant and re-link tests (spec derived_tests coverage)"
+        spec_ref: "behaviors.ADD-002"
+        status: pending
+        depends_on: ["P1-06", "P1-07"]
+        note: >
+          Add tests to src/commands/add.test.ts (create if not exists) covering:
+          1. Tool with variants and no default — error emitted, exit 1
+          2. Tool with default variant — runs silently
+          3. Re-link of already-linked top-level tool — warning emitted
+          4. Required tool re-applied transitively — no warning emitted
+        files:
+          - "src/commands/add.test.ts"
+
+      - id: P4-04
+        title: "Add ADD-005 local fork tests (spec derived_tests coverage)"
+        spec_ref: "behaviors.ADD-005"
+        status: pending
+        depends_on: ["P1-04"]
+        note: >
+          Add tests covering: happy path (tool copied to tools/<name>/), tool
+          not in built-ins (error), local fork already exists (error).
+          Verify that customizable=false does NOT block the fork (the flag
+          is not a spec concept).
+        files:
+          - "src/commands/add.test.ts"
+
+      - id: P4-05
+        title: "JSON output consistency audit across all commands"
+        spec_ref: null
+        status: pending
+        note: >
+          Verify that in --json mode, every failure path across init, add, info,
+          and list emits { success: false, error: '...' } to stdout (not stderr)
+          and exits with code 1. Fix any path that emits plain text in json mode
+          or that emits to stderr instead of stdout. Verify exit codes are
+          consistent. This is an audit + fix task, not a feature task.
+        files:
+          - "src/commands/init.tsx"
+          - "src/commands/add.tsx"
+          - "src/commands/info.tsx"
+          - "src/commands/list.tsx"
+          - "src/index.tsx"
+
+      - id: P4-06
+        title: "Verify TOOL-002 requires chain does not re-emit warnings"
+        spec_ref: "behaviors.TOOL-002"
+        status: pending
+        depends_on: ["P1-07"]
+        note: >
+          Verify that ensureRequiredTools() passes silent:true to runRoot/runLink
+          and that the re-link warning check is correctly gated on !silent.
+          Add a test: tool B requires tool A; tool A already linked; trigger
+          ADD-002 for tool B; assert no re-link warning for A.
+        files:
+          - "src/commands/add.tsx"
+          - "src/commands/add.test.ts"
+
+      - id: P4-07
+        title: "Scaffold cleanup error reporting for ADD-001 and ADD-003"
+        spec_ref: "behaviors.ADD-001"
+        status: pending
+        depends_on: ["P1-09"]
+        note: >
+          Add tests to src/commands/add.test.ts covering the two cleanup scenarios
+          from ADD-001 and ADD-003 derived_tests:
+          1. Scaffold fails midway, cleanup succeeds: partial dir removed, original
+             error reported, exit 1.
+          2. Scaffold fails midway, cleanup also fails: both errors reported,
+             partial dir left in place, manualCleanupRequired=true in JSON output,
+             exit 1.
+        files:
+          - "src/commands/add.test.ts"

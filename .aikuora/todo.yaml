@@ -28,7 +28,7 @@ phases:
         status: completed
         note: >
           In src/commands/add.tsx the triplet
-          scanAllTools → resolveTool → loadToolConfig with three separate error
+          scanAllTools -> resolveTool -> loadToolConfig with three separate error
           checks is copy-pasted identically in runRoot, runScaffold, runShareable,
           and runLink (four copies). Extract a private helper
           `async function loadResolvedTool(toolName, projectRoot, customPaths, json, mode, silent?)`
@@ -61,7 +61,7 @@ phases:
           fix is `basename(absolutePath)`, which is already imported on line 2.
           Remove the .split('/').pop() chain and replace with a single basename call.
           Note: basename is already imported. This is a pure simplification — the
-          bug fix itself is tracked in P1-03 (spec alignment phase); this task
+          bug fix itself is tracked in P2-03 (spec alignment phase); this task
           covers the readability/correctness improvement independently.
         files:
           - "src/core/scanner.ts"
@@ -125,8 +125,8 @@ phases:
           customizable. The toolConfigSchema still declares customizable as a field
           (default false), making every built-in tool reject --local unless the
           field is explicitly set. While full removal of the customizable gate is
-          tracked in P1-04 (spec alignment), this task: (1) adds a TODO comment
-          on the customizable check citing P1-04, (2) updates the AddOptions JSDoc
+          tracked in P2-04 (spec alignment), this task: (1) adds a TODO comment
+          on the customizable check citing P2-04, (2) updates the AddOptions JSDoc
           to accurately reflect current behavior, and (3) removes the `local` mode
           label from AddCommand props that incorrectly says 'install' as fallback
           for the 'bare add' case (line 148 in index.tsx). No behavior change.
@@ -135,10 +135,168 @@ phases:
           - "src/index.tsx"
 
   - id: 1
-    name: "Spec Alignment Fixes"
+    name: "Structural Refactoring — Split add.tsx"
     status: pending
     tasks:
       - id: P1-01
+        title: "Extract workspace integration helpers to src/utils/workspace-integrations.ts"
+        spec_ref: null
+        status: pending
+        note: >
+          Create new file src/utils/workspace-integrations.ts.
+          Move these functions from src/commands/add.tsx:
+            mergeJsonFile, mergeVscodeExtensions, mergeClaudeHooks,
+            mergeGitignore, applyWorkspaceSettings.
+          Export all as named exports.
+          Add necessary imports (fs, fs/promises, path, output, tool-config types).
+          Update src/commands/add.tsx to import these from the new file instead.
+          No behavior change.
+        files:
+          - "src/utils/workspace-integrations.ts"
+          - "src/commands/add.tsx"
+
+      - id: P1-02
+        title: "Extract tsconfig/CSS/package helpers to src/utils/integration-patches.ts"
+        spec_ref: null
+        status: pending
+        note: >
+          Create new file src/utils/integration-patches.ts.
+          Move these functions from src/commands/add.tsx:
+            patchTsconfigPaths, patchTsconfigReferences,
+            injectCssImport, ensureRootPeerDeps, sortDeps.
+          Export all as named exports.
+          Update src/commands/add.tsx to import these from the new file.
+          No behavior change.
+        files:
+          - "src/utils/integration-patches.ts"
+          - "src/commands/add.tsx"
+
+      - id: P1-03
+        title: "Extract runRoot + ensureRequiredTools to src/commands/add/root.ts"
+        spec_ref: null
+        status: pending
+        note: >
+          Create directory src/commands/add/ if needed.
+          Create src/commands/add/root.ts.
+          Move runRoot and ensureRequiredTools from add.tsx into this file.
+          Import AddOptions from ../add.js (the parent file will re-export it).
+          Import workspace-integrations, integration-patches, and other utilities.
+          Export runRoot and ensureRequiredTools as named exports.
+          Update add.tsx to import runRoot from ./add/root.js.
+          No behavior change.
+        files:
+          - "src/commands/add/root.ts"
+          - "src/commands/add.tsx"
+
+      - id: P1-04
+        title: "Extract runLocal to src/commands/add/local.ts"
+        spec_ref: null
+        status: pending
+        note: >
+          Create src/commands/add/local.ts.
+          Move runLocal from add.tsx into this file.
+          Import AddOptions from ../add.js.
+          Export runLocal as named export.
+          Update add.tsx to import runLocal from ./add/local.js.
+          No behavior change.
+        files:
+          - "src/commands/add/local.ts"
+          - "src/commands/add.tsx"
+
+      - id: P1-05
+        title: "Extract buildToolExportPatterns + ensureConfigsEntry to src/commands/add/configs-entry.ts"
+        spec_ref: null
+        status: pending
+        note: >
+          Create src/commands/add/configs-entry.ts.
+          Move buildToolExportPatterns and ensureConfigsEntry from add.tsx.
+          These are used by both runShareable and runLink so they need their own module.
+          Import sortDeps from ../../utils/integration-patches.js.
+          Export both as named exports.
+          Update add.tsx to import from ./add/configs-entry.js.
+          No behavior change.
+        files:
+          - "src/commands/add/configs-entry.ts"
+          - "src/commands/add.tsx"
+
+      - id: P1-06
+        title: "Extract runShareable to src/commands/add/shareable.ts"
+        spec_ref: null
+        status: pending
+        note: >
+          Create src/commands/add/shareable.ts.
+          Move runShareable from add.tsx into this file.
+          Import AddOptions from ../add.js.
+          Import ensureConfigsEntry from ./configs-entry.js.
+          Import workspace-integrations utilities.
+          Export runShareable as named export.
+          Update add.tsx to import runShareable from ./add/shareable.js.
+          No behavior change.
+        files:
+          - "src/commands/add/shareable.ts"
+          - "src/commands/add.tsx"
+
+      - id: P1-07
+        title: "Extract runLink to src/commands/add/link.ts"
+        spec_ref: null
+        status: pending
+        note: >
+          Create src/commands/add/link.ts.
+          Move runLink from add.tsx into this file.
+          Import AddOptions from ../add.js.
+          Import ensureConfigsEntry from ./configs-entry.js.
+          Import workspace-integrations utilities.
+          Import integration-patches utilities.
+          Export runLink as named export.
+          Update add.tsx to import runLink from ./add/link.js.
+          No behavior change.
+        files:
+          - "src/commands/add/link.ts"
+          - "src/commands/add.tsx"
+
+      - id: P1-08
+        title: "Extract ensureWorkspacePackage + runScaffold to src/commands/add/scaffold.ts"
+        spec_ref: null
+        status: pending
+        note: >
+          Create src/commands/add/scaffold.ts.
+          Move ensureWorkspacePackage and runScaffold from add.tsx.
+          Import AddOptions from ../add.js.
+          Import runLink from ./link.js.
+          Import workspace-integrations utilities.
+          Import integration-patches utilities (sortDeps, patchTsconfigReferences, injectCssImport).
+          Export runScaffold and ensureWorkspacePackage as named exports.
+          Update add.tsx to import runScaffold from ./add/scaffold.js.
+          No behavior change.
+        files:
+          - "src/commands/add/scaffold.ts"
+          - "src/commands/add.tsx"
+
+      - id: P1-09
+        title: "Extract runProjectDependency to src/commands/add/project-dep.ts + slim add.tsx"
+        spec_ref: null
+        status: pending
+        note: >
+          Create src/commands/add/project-dep.ts.
+          Move runProjectDependency from add.tsx.
+          Import AddOptions from ../add.js.
+          Export runProjectDependency as named export.
+          After moving all run* functions, add.tsx should contain ONLY:
+            - AddOptions interface
+            - addCommand dispatcher function
+            - AddCommand Ink component
+            - Imports for all run* functions from ./add/*.js
+          Target: add.tsx should be ~80-100 lines maximum.
+          No behavior change.
+        files:
+          - "src/commands/add/project-dep.ts"
+          - "src/commands/add.tsx"
+
+  - id: 2
+    name: "Spec Alignment Fixes"
+    status: pending
+    tasks:
+      - id: P2-01
         title: "Align configSchema — move name/scope to top level (ADR-004)"
         spec_ref: "behaviors.STARTUP-001"
         status: pending
@@ -147,8 +305,8 @@ phases:
           top-level `name: z.string().min(1)` and
           `scope: z.string().regex(/^@[a-z0-9-]+$/)`. Update
           src/managers/config.ts createDefaultConfig accordingly.
-          Update all callsites: rootConfig.project.name → rootConfig.name,
-          rootConfig.project.scope → rootConfig.scope.
+          Update all callsites: rootConfig.project.name -> rootConfig.name,
+          rootConfig.project.scope -> rootConfig.scope.
           Verify templates/init/aikuora.workspace.yml.hbs emits top-level fields.
         files:
           - "src/types/config.ts"
@@ -157,7 +315,7 @@ phases:
           - "src/commands/init.tsx"
           - "templates/init/aikuora.workspace.yml.hbs"
 
-      - id: P1-02
+      - id: P2-02
         title: "Update projectFileSchema — add shareable kind, name, scaffold_tool, tools, dependencies"
         spec_ref: "behaviors.ADD-001"
         status: pending
@@ -173,7 +331,7 @@ phases:
           - "src/utils/project-file.ts"
           - "src/commands/add.tsx"
 
-      - id: P1-03
+      - id: P2-03
         title: "Fix scanCustomTools — use basename not dirname for tool name"
         spec_ref: "behaviors.TOOL-001"
         status: pending
@@ -185,21 +343,22 @@ phases:
         files:
           - "src/core/scanner.ts"
 
-      - id: P1-04
+      - id: P2-04
         title: "Fix runLocal — remove customizable gate; any built-in tool can be forked"
         spec_ref: "behaviors.ADD-005"
         status: pending
         note: >
-          In src/commands/add.tsx, runLocal() checks `toolConfig.customizable`
-          before allowing the fork. Spec says any built-in tool can be forked
-          via --local. Remove the customizable check. Keep the check that the
-          tool exists in scanBuiltInTools() only (not in customTools or project tools).
+          In src/commands/add.tsx (or src/commands/add/local.ts after P1-04),
+          runLocal() checks `toolConfig.customizable` before allowing the fork.
+          Spec says any built-in tool can be forked via --local. Remove the
+          customizable check. Keep the check that the tool exists in
+          scanBuiltInTools() only (not in customTools or project tools).
           Update error message to match spec: "Tool '<name>' not found in
           built-in registry".
         files:
-          - "src/commands/add.tsx"
+          - "src/commands/add/local.ts"
 
-      - id: P1-05
+      - id: P2-05
         title: "Implement INIT-001 nested workspace prevention"
         spec_ref: "behaviors.INIT-001"
         status: pending
@@ -213,53 +372,55 @@ phases:
           - "src/commands/init.tsx"
           - "src/managers/config.ts"
 
-      - id: P1-06
+      - id: P2-06
         title: "Implement variant required error in runLink (ADD-002)"
         spec_ref: "behaviors.ADD-002"
         status: pending
         note: >
-          In src/commands/add.tsx runLink(): when link.variants is non-empty and
-          no --variant flag is given, check if any variant has `default: true`.
-          If yes, use it silently. If no, emit error:
+          In src/commands/add/link.ts (after P1-07) runLink(): when link.variants
+          is non-empty and no --variant flag is given, check if any variant has
+          `default: true`. If yes, use it silently. If no, emit error:
           "Tool '<name>' requires a variant. Available variants: <v1>, <v2>, ..."
           and return { success: false } with exit code 1.
         files:
-          - "src/commands/add.tsx"
+          - "src/commands/add/link.ts"
 
-      - id: P1-07
+      - id: P2-07
         title: "Implement re-link warning in runLink (ADD-002 side_effects)"
         spec_ref: "behaviors.ADD-002"
         status: pending
         note: >
-          In src/commands/add.tsx runLink(): read the existing project file before
-          applying. If the top-level toolName already appears in project.tools
-          (or dependencies.tools in current schema), emit a warning to stderr:
-          "Warning: tool '<name>' is already linked to this project. Re-applying."
-          Do NOT emit this warning for transitive required tools (silent=true path).
+          In src/commands/add/link.ts (after P1-07) runLink(): read the existing
+          project file before applying. If the top-level toolName already appears
+          in project.tools (or dependencies.tools in current schema), emit a warning
+          to stderr: "Warning: tool '<name>' is already linked to this project.
+          Re-applying." Do NOT emit this warning for transitive required tools
+          (silent=true path).
         files:
-          - "src/commands/add.tsx"
+          - "src/commands/add/link.ts"
 
-      - id: P1-08
+      - id: P2-08
         title: "Implement VSCode key conflict warning in mergeVscodeSettings (WS-001)"
         spec_ref: "behaviors.WS-001"
         status: pending
         note: >
           Create a new mergeVscodeSettings(filePath, patch) function in
-          src/commands/add.tsx (or extract to src/utils/workspace-integrations.ts).
+          src/utils/workspace-integrations.ts (after P1-01).
           For each incoming key, if it already exists in settings.json with a
           different value, emit to process.stderr:
           "Warning: VSCode setting '<key>' overwritten (was: <old>, now: <new>)".
           Then apply the new value. Replace all calls to mergeJsonFile for
           .vscode/settings.json with mergeVscodeSettings.
         files:
-          - "src/commands/add.tsx"
+          - "src/utils/workspace-integrations.ts"
 
-      - id: P1-09
+      - id: P2-09
         title: "Implement scaffold cleanup on partial failure (ADD-001, ADD-003)"
         spec_ref: "behaviors.ADD-001"
         status: pending
         note: >
-          In src/commands/add.tsx runScaffold() and runShareable():
+          In src/commands/add/scaffold.ts (after P1-08) runScaffold() and in
+          src/commands/add/shareable.ts (after P1-06) runShareable():
           Wrap the body in try/catch. On failure after targetDir was created,
           attempt fse.remove(targetDir). If cleanup also fails, report both
           errors and include the partial path. In JSON mode: emit
@@ -267,9 +428,10 @@ phases:
           partialPath }. In human mode: show both error messages and instruct
           the user to manually delete the directory.
         files:
-          - "src/commands/add.tsx"
+          - "src/commands/add/scaffold.ts"
+          - "src/commands/add/shareable.ts"
 
-      - id: P1-10
+      - id: P2-10
         title: "Fix bare add with nonexistent tool — return 'Tool not found in registry'"
         spec_ref: "behaviors.TOOL-001"
         status: pending
@@ -282,11 +444,11 @@ phases:
         files:
           - "src/commands/add.tsx"
 
-  - id: 2
+  - id: 3
     name: "STARTUP-001 Workspace Validation Guard"
     status: pending
     tasks:
-      - id: P2-01
+      - id: P3-01
         title: "Create validateWorkspace utility (STARTUP-001)"
         spec_ref: "behaviors.STARTUP-001"
         status: pending
@@ -303,11 +465,11 @@ phases:
           - "src/utils/workspace.ts"
           - "src/utils/workspace.test.ts"
 
-      - id: P2-02
+      - id: P3-02
         title: "Wire validateWorkspace into all commands (STARTUP-001)"
         spec_ref: "behaviors.STARTUP-001"
         status: pending
-        depends_on: ["P2-01", "P1-01"]
+        depends_on: ["P3-01", "P2-01"]
         note: >
           Update src/commands/add.tsx and src/commands/init.tsx (init is exempt).
           Each command's async function calls validateWorkspace(cwd) as the first
@@ -318,15 +480,15 @@ phases:
           - "src/commands/add.tsx"
           - "src/index.tsx"
 
-  - id: 3
+  - id: 4
     name: "New Commands: info and list"
     status: pending
     tasks:
-      - id: P3-01
+      - id: P4-01
         title: "Create project scanner utility (used by INFO-001 and LIST-001)"
         spec_ref: "behaviors.INFO-001"
         status: pending
-        depends_on: ["P1-02"]
+        depends_on: ["P2-02"]
         note: >
           Create src/utils/project-scanner.ts with scanProjects(workspaceRoot, structure).
           It walks structure.apps, structure.packages, structure.modules directories,
@@ -341,11 +503,11 @@ phases:
           - "src/utils/project-scanner.ts"
           - "src/utils/project-scanner.test.ts"
 
-      - id: P3-02
+      - id: P4-02
         title: "Implement aikuora info command (INFO-001)"
         spec_ref: "behaviors.INFO-001"
         status: pending
-        depends_on: ["P2-01", "P3-01"]
+        depends_on: ["P3-01", "P4-01"]
         note: >
           Create src/commands/info.tsx with infoCommand(options) and InfoCommand component.
           Output: workspace name, scope, all projects with kind and linked tools,
@@ -360,11 +522,11 @@ phases:
           - "src/commands/info.test.ts"
           - "src/index.tsx"
 
-      - id: P3-03
+      - id: P4-03
         title: "Implement aikuora list command (LIST-001)"
         spec_ref: "behaviors.LIST-001"
         status: pending
-        depends_on: ["P2-01", "P3-01"]
+        depends_on: ["P3-01", "P4-01"]
         note: >
           Create src/commands/list.tsx with listCommand(options) and ListCommand component.
           Type argument values: tools, apps, packages, modules.
@@ -383,15 +545,15 @@ phases:
           - "src/commands/list.test.ts"
           - "src/index.tsx"
 
-  - id: 4
+  - id: 5
     name: "Polish and Hardening"
     status: pending
     tasks:
-      - id: P4-01
+      - id: P5-01
         title: "Add STARTUP-001 tests (spec derived_tests coverage)"
         spec_ref: "behaviors.STARTUP-001"
         status: pending
-        depends_on: ["P2-01"]
+        depends_on: ["P3-01"]
         note: >
           Add tests to src/utils/workspace.test.ts covering all three derived_tests
           for STARTUP-001: invalid scope, valid config, missing name.
@@ -400,11 +562,11 @@ phases:
         files:
           - "src/utils/workspace.test.ts"
 
-      - id: P4-02
+      - id: P5-02
         title: "Add INIT-001 nested workspace test (spec derived_tests coverage)"
         spec_ref: "behaviors.INIT-001"
         status: pending
-        depends_on: ["P1-05"]
+        depends_on: ["P2-05"]
         note: >
           Add a test to src/commands/init.test.ts (create if not exists) for the
           nested workspace scenario: create a parent dir with aikuora.workspace.yml,
@@ -414,11 +576,11 @@ phases:
         files:
           - "src/commands/init.test.ts"
 
-      - id: P4-03
+      - id: P5-03
         title: "Add ADD-002 variant and re-link tests (spec derived_tests coverage)"
         spec_ref: "behaviors.ADD-002"
         status: pending
-        depends_on: ["P1-06", "P1-07"]
+        depends_on: ["P2-06", "P2-07"]
         note: >
           Add tests to src/commands/add.test.ts (create if not exists) covering:
           1. Tool with variants and no default — error emitted, exit 1
@@ -428,11 +590,11 @@ phases:
         files:
           - "src/commands/add.test.ts"
 
-      - id: P4-04
+      - id: P5-04
         title: "Add ADD-005 local fork tests (spec derived_tests coverage)"
         spec_ref: "behaviors.ADD-005"
         status: pending
-        depends_on: ["P1-04"]
+        depends_on: ["P2-04"]
         note: >
           Add tests covering: happy path (tool copied to tools/<name>/), tool
           not in built-ins (error), local fork already exists (error).
@@ -441,7 +603,7 @@ phases:
         files:
           - "src/commands/add.test.ts"
 
-      - id: P4-05
+      - id: P5-05
         title: "JSON output consistency audit across all commands"
         spec_ref: null
         status: pending
@@ -458,25 +620,25 @@ phases:
           - "src/commands/list.tsx"
           - "src/index.tsx"
 
-      - id: P4-06
+      - id: P5-06
         title: "Verify TOOL-002 requires chain does not re-emit warnings"
         spec_ref: "behaviors.TOOL-002"
         status: pending
-        depends_on: ["P1-07"]
+        depends_on: ["P2-07"]
         note: >
           Verify that ensureRequiredTools() passes silent:true to runRoot/runLink
           and that the re-link warning check is correctly gated on !silent.
           Add a test: tool B requires tool A; tool A already linked; trigger
           ADD-002 for tool B; assert no re-link warning for A.
         files:
-          - "src/commands/add.tsx"
+          - "src/commands/add/root.ts"
           - "src/commands/add.test.ts"
 
-      - id: P4-07
+      - id: P5-07
         title: "Scaffold cleanup error reporting for ADD-001 and ADD-003"
         spec_ref: "behaviors.ADD-001"
         status: pending
-        depends_on: ["P1-09"]
+        depends_on: ["P2-09"]
         note: >
           Add tests to src/commands/add.test.ts covering the two cleanup scenarios
           from ADD-001 and ADD-003 derived_tests:

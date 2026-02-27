@@ -8,18 +8,22 @@ import { Text } from 'ink';
 
 import { loadToolConfig } from '../core/loader.js';
 import { resolveTool } from '../core/resolver.js';
-import { scanAllTools, scanBuiltInTools } from '../core/scanner.js';
-import type { DiscoveredTool } from '../types/tool.js';
+import { scanAllTools } from '../core/scanner.js';
 import { readConfig } from '../managers/config.js';
 import type { Config } from '../types/config.js';
-import type { MoonTask, WorkspaceConfig } from '../types/tool-config.js';
-import { addInheritedMoonTasks, addMoonTask, buildMoonConfig, writeMoonYml } from '../utils/moon.js';
+import type { MoonTask } from '../types/tool-config.js';
+import { addMoonTask, buildMoonConfig, writeMoonYml } from '../utils/moon.js';
 import type { OutputOptions } from '../utils/output.js';
 import { output, outputError, outputSuccess } from '../utils/output.js';
 import { invokeIntegrationHandler } from '../utils/integration.js';
-import { pinProtoVersion, updatePrototools } from '../utils/prototools.js';
+import { applyWorkspaceSettings } from '../utils/workspace-integrations.js';
+import { ensureRootPeerDeps, injectCssImport, patchTsconfigPaths, patchTsconfigReferences, sortDeps } from '../utils/integration-patches.js';
+import { updatePrototools } from '../utils/prototools.js';
 import { appendProjectDependency, appendToolDependency, readProjectFile, writeProjectFile } from '../utils/project-file.js';
 import { renderAndCopy } from '../utils/template.js';
+import { loadResolvedTool } from './add/shared.js';
+import { ensureRequiredTools, runRoot } from './add/root.js';
+import { runLocal } from './add/local.js';
 
 export interface AddOptions extends OutputOptions {
   toolName: string;
@@ -53,197 +57,10 @@ function readJsonFile<T extends Record<string, unknown>>(p: string): T {
   return JSON.parse(readFileSync(p, 'utf-8')) as T;
 }
 
-/**
- * Resolve a tool by name and load its config in one step.
- * Returns `{ success: false }` (after emitting the appropriate error) when
- * the tool cannot be found or its config cannot be loaded.
- */
-async function loadResolvedTool(
-  toolName: string,
-  projectRoot: string,
-  customPaths: string[],
-  json: boolean | undefined,
-  mode: string,
-  silent?: boolean
-): Promise<
-  | { success: false }
-  | {
-      success: true;
-      discovered: DiscoveredTool;
-      toolConfig: NonNullable<ReturnType<typeof loadToolConfig>['data']>;
-      tools: ReturnType<typeof scanAllTools>;
-    }
-> {
-  const tools = scanAllTools(projectRoot, customPaths);
-  const discovered = resolveTool(toolName, tools);
+// (loadResolvedTool moved to src/commands/add/shared.ts)
+// (runRoot + ensureRequiredTools moved to src/commands/add/root.ts)
 
-  if (!discovered) {
-    const err = `Tool '${toolName}' not found`;
-    if (!silent) {
-      if (json) output({ action: 'add', mode, success: false, error: err }, { json: json ?? false });
-      else outputError(err, { json: json ?? false });
-    }
-    return { success: false };
-  }
-
-  const loaderResult = loadToolConfig(discovered.path);
-  if (!loaderResult.success) {
-    const err = loaderResult.error?.message ?? 'Could not load tool config';
-    if (!silent) {
-      if (json) output({ action: 'add', mode, success: false, error: err }, { json: json ?? false });
-      else outputError(err, { json: json ?? false });
-    }
-    return { success: false };
-  }
-
-  return { success: true, discovered, toolConfig: loaderResult.data!, tools };
-}
-
-// ---------------------------------------------------------------------------
-// Mode R: Root tool setup (kind: root)
-// ---------------------------------------------------------------------------
-
-async function runRoot(options: AddOptions): Promise<{ success: boolean }> {
-  const { toolName, json, silent, cwd = process.cwd() } = options;
-  const projectRoot = resolve(cwd);
-
-  const configResult = readConfig();
-  if (!configResult.success) {
-    const err = configResult.error?.message ?? 'Could not read project config';
-    if (!silent) {
-      if (json) output({ action: 'add', mode: 'root', success: false, error: err }, { json });
-      else outputError(err, { json });
-    }
-    return { success: false };
-  }
-
-  const rootConfig = configResult.data!;
-
-  const resolved = await loadResolvedTool(
-    toolName,
-    projectRoot,
-    rootConfig.customTools,
-    json,
-    'root',
-    silent
-  );
-  if (!resolved.success) return { success: false };
-  const { discovered, toolConfig } = resolved;
-
-  if (toolConfig.kind !== 'root') {
-    const err = `Tool '${toolName}' is not a root tool (kind: ${toolConfig.kind})`;
-    if (!silent) {
-      if (json) output({ action: 'add', mode: 'root', success: false, error: err }, { json });
-      else outputError(err, { json });
-    }
-    return { success: false };
-  }
-
-  // Ensure required root tools are set up first (e.g. pnpm requires node)
-  if (toolConfig.requires && toolConfig.requires.length > 0) {
-    await ensureRequiredTools(toolConfig.requires, options);
-  }
-
-  // Render template/ files to project root.
-  // skipExisting: true — never overwrite user-modified files (package.json, etc.) on re-runs.
-  const templateDir = join(discovered.path, 'template');
-  if (existsSync(templateDir)) {
-    const context = {
-      structure: rootConfig.structure,
-      defaults: rootConfig.defaults,
-      project: rootConfig.project,
-    };
-    await renderAndCopy(templateDir, projectRoot, context as Record<string, unknown>, {
-      skipExisting: true,
-    });
-  }
-
-  // Pin version in .prototools using proto pin --resolve so the real version is stored
-  if (toolConfig.installer === 'proto') {
-    const defaults = rootConfig.defaults as Record<string, string>;
-    const version = defaults[toolName] ?? toolConfig.version ?? 'latest';
-    await pinProtoVersion(projectRoot, toolName, version);
-  }
-
-  // Apply workspace settings (vscode, claude hooks, moon tasks)
-  if (toolConfig.workspace) {
-    await applyWorkspaceSettings(projectRoot, toolConfig.workspace, toolName);
-  }
-
-  const result = { action: 'add', mode: 'root', success: true, tool: toolName };
-
-  if (!silent) {
-    if (json) output(result, { json });
-    else outputSuccess(`Configured ${toolName} at workspace root`, { json });
-  }
-
-  return { success: true };
-}
-
-/**
- * Ensure all tools listed in `requires` are set up as root tools before proceeding.
- * Runs silently — the caller is responsible for reporting its own success.
- */
-async function ensureRequiredTools(requires: string[], baseOptions: AddOptions): Promise<void> {
-  for (const reqTool of requires) {
-    await runRoot({ ...baseOptions, toolName: reqTool, silent: true });
-  }
-}
-
-// ---------------------------------------------------------------------------
-// tsconfig / CSS helpers (used when wiring workspace packages)
-// ---------------------------------------------------------------------------
-
-/**
- * Patch a tsconfig.json to add path aliases pointing to a package's own src/.
- * Used for the package itself (self-referential aliases).
- * Idempotent: skips if the key already exists.
- */
-async function patchTsconfigPaths(
-  tsconfigPath: string,
-  scopedName: string,
-  srcBase: string
-): Promise<void> {
-  if (!existsSync(tsconfigPath)) return;
-  const tsconfig = readJsonFile<Record<string, unknown>>(tsconfigPath);
-  const co = (tsconfig.compilerOptions as Record<string, unknown>) ?? {};
-  const paths = (co.paths as Record<string, string[]>) ?? {};
-  const key = `${scopedName}/*`;
-  if (key in paths) return;
-  paths[key] = [`${srcBase}/*`];
-  co.paths = paths;
-  tsconfig.compilerOptions = co;
-  await writeFile(tsconfigPath, JSON.stringify(tsconfig, null, 2) + '\n', 'utf-8');
-}
-
-/**
- * Patch a tsconfig.json to add a TypeScript project reference.
- * Used by consumer apps to reference workspace packages.
- * Idempotent: skips if the reference path already exists.
- */
-async function patchTsconfigReferences(tsconfigPath: string, refPath: string): Promise<void> {
-  if (!existsSync(tsconfigPath)) return;
-  const tsconfig = readJsonFile<Record<string, unknown>>(tsconfigPath);
-  const refs = (tsconfig.references as Array<{ path: string }>) ?? [];
-  if (refs.some((r) => r.path === refPath)) return;
-  refs.push({ path: refPath });
-  tsconfig.references = refs;
-  await writeFile(tsconfigPath, JSON.stringify(tsconfig, null, 2) + '\n', 'utf-8');
-}
-
-/**
- * Inject `@import "<scopedName>/globals.css"` into a CSS file, right after the
- * first existing @import line. Idempotent: no-op if already present.
- */
-async function injectCssImport(cssPath: string, scopedName: string): Promise<void> {
-  if (!existsSync(cssPath)) return;
-  let css = readFileSync(cssPath, 'utf-8');
-  const importLine = `@import "${scopedName}/globals.css";`;
-  if (css.includes(importLine)) return;
-  // Insert after the first @import line (e.g. @import "tailwindcss")
-  css = css.replace(/(@import ['"][^'"]+['"];?\n)/, `$1${importLine}\n`);
-  await writeFile(cssPath, css, 'utf-8');
-}
+// (tsconfig / CSS helpers moved to src/utils/integration-patches.ts)
 
 // ---------------------------------------------------------------------------
 // Workspace package helper (used by scaffold.packages)
@@ -476,13 +293,7 @@ async function runScaffold(options: AddOptions) {
   return result;
 }
 
-// ---------------------------------------------------------------------------
-// package.json helpers
-// ---------------------------------------------------------------------------
-
-function sortDeps(deps: Record<string, string>): Record<string, string> {
-  return Object.fromEntries(Object.entries(deps).sort(([a], [b]) => a.localeCompare(b)));
-}
+// (sortDeps moved to src/utils/integration-patches.ts)
 
 // Determine the correct package.json export patterns for a shareable tool.
 // Node.js exports only allow ONE * per pattern, so we use per-tool paths:
@@ -517,132 +328,9 @@ function buildToolExportPatterns(toolName: string, templateDir: string): Record<
   return patterns;
 }
 
-/**
- * Add peerDependencies from a package to the root workspace package.json devDependencies.
- * Skips keys that are already present. No-ops if root package.json doesn't exist.
- */
-async function ensureRootPeerDeps(
-  projectRoot: string,
-  peerDeps: Record<string, string>
-): Promise<void> {
-  const rootPkgPath = join(projectRoot, 'package.json');
-  if (!existsSync(rootPkgPath)) return;
+// (ensureRootPeerDeps moved to src/utils/integration-patches.ts)
 
-  const rootPkg = readJsonFile<Record<string, unknown>>(rootPkgPath);
-  const devDeps = (rootPkg.devDependencies as Record<string, string>) ?? {};
-
-  let changed = false;
-  for (const [dep, version] of Object.entries(peerDeps)) {
-    if (!(dep in devDeps)) {
-      devDeps[dep] = version;
-      changed = true;
-    }
-  }
-
-  if (changed) {
-    rootPkg.devDependencies = sortDeps(devDeps);
-    await writeFile(rootPkgPath, JSON.stringify(rootPkg, null, 2) + '\n', 'utf-8');
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Workspace-level settings helpers
-// ---------------------------------------------------------------------------
-
-async function mergeJsonFile(filePath: string, patch: Record<string, unknown>): Promise<void> {
-  const existing = readJsonFile<Record<string, unknown>>(filePath);
-  const merged = { ...existing, ...patch };
-  await mkdir(join(filePath, '..'), { recursive: true });
-  await writeFile(filePath, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
-}
-
-async function mergeClaudeHooks(
-  filePath: string,
-  hooks: Record<string, Array<{ matcher: string; hooks: Array<{ type: string; command: string }> }>>
-): Promise<void> {
-  const existing = readJsonFile<Record<string, unknown>>(filePath);
-  const existingHooks =
-    (existing.hooks as Record<string, Array<{ matcher: string }>> ) ?? {};
-
-  for (const [event, newHooks] of Object.entries(hooks)) {
-    const current = existingHooks[event] ?? [];
-    for (const hook of newHooks) {
-      if (!current.some((h) => h.matcher === hook.matcher)) {
-        current.push(hook);
-      }
-    }
-    existingHooks[event] = current;
-  }
-
-  const merged = { ...existing, hooks: existingHooks };
-  await mkdir(join(filePath, '..'), { recursive: true });
-  await writeFile(filePath, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
-}
-
-async function mergeVscodeExtensions(filePath: string, extensions: string[]): Promise<void> {
-  const existing = readJsonFile<{ recommendations?: string[] }>(filePath);
-  const current = existing.recommendations ?? [];
-  for (const ext of extensions) {
-    if (!current.includes(ext)) current.push(ext);
-  }
-  await mkdir(join(filePath, '..'), { recursive: true });
-  await writeFile(filePath, JSON.stringify({ ...existing, recommendations: current }, null, 2) + '\n', 'utf-8');
-}
-
-async function mergeGitignore(
-  filePath: string,
-  patterns: string[],
-  toolName?: string
-): Promise<void> {
-  let existing = '';
-  if (existsSync(filePath)) {
-    existing = readFileSync(filePath, 'utf-8');
-  }
-
-  const existingPatterns = new Set(
-    existing.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))
-  );
-
-  const newPatterns = patterns.filter((p) => !existingPatterns.has(p));
-  if (newPatterns.length === 0) return;
-
-  const base = !existing || existing.endsWith('\n') ? existing : existing + '\n';
-  const separator = base ? '\n' : '';
-  const block = separator + (toolName ? `# ${toolName}\n` : '') + newPatterns.join('\n') + '\n';
-  await mkdir(join(filePath, '..'), { recursive: true });
-  await writeFile(filePath, base + block, 'utf-8');
-}
-
-async function applyWorkspaceSettings(
-  projectRoot: string,
-  workspace: WorkspaceConfig,
-  toolName?: string
-): Promise<void> {
-  if (workspace.vscode?.settings) {
-    await mergeJsonFile(
-      join(projectRoot, '.vscode', 'settings.json'),
-      workspace.vscode.settings
-    );
-  }
-  if (workspace.vscode?.extensions) {
-    await mergeVscodeExtensions(
-      join(projectRoot, '.vscode', 'extensions.json'),
-      workspace.vscode.extensions
-    );
-  }
-  if (workspace.claude?.hooks) {
-    await mergeClaudeHooks(
-      join(projectRoot, '.claude', 'settings.json'),
-      workspace.claude.hooks
-    );
-  }
-  if (workspace.moon) {
-    await addInheritedMoonTasks(projectRoot, workspace.moon);
-  }
-  if (workspace.gitignore && workspace.gitignore.length > 0) {
-    await mergeGitignore(join(projectRoot, '.gitignore'), workspace.gitignore, toolName);
-  }
-}
+// (workspace integration helpers moved to src/utils/workspace-integrations.ts)
 
 // ---------------------------------------------------------------------------
 // Shared package helper (used by shareable tools)
@@ -950,67 +638,7 @@ async function runLink(options: AddOptions) {
   return result;
 }
 
-// ---------------------------------------------------------------------------
-// Mode C: Local fork
-// ---------------------------------------------------------------------------
-
-async function runLocal(options: AddOptions) {
-  const { toolName, json, cwd = process.cwd() } = options;
-  const projectRoot = resolve(cwd);
-
-  const builtInTools = scanBuiltInTools();
-  const discovered = resolveTool(toolName, builtInTools);
-
-  if (!discovered) {
-    const err = `Tool '${toolName}' not found in built-in tools`;
-    if (json) output({ action: 'add', mode: 'local', success: false, error: err }, { json });
-    else outputError(err, { json });
-    return { success: false };
-  }
-
-  const loaderResult = loadToolConfig(discovered.path);
-  if (!loaderResult.success) {
-    const err = loaderResult.error?.message ?? 'Could not load tool config';
-    if (json) output({ action: 'add', mode: 'local', success: false, error: err }, { json });
-    else outputError(err, { json });
-    return { success: false };
-  }
-
-  const toolConfig = loaderResult.data!;
-
-  // TODO(P1-04): Remove this gate — spec says any built-in tool can be forked via --local.
-  // customizable is not a spec concept; this check will be removed in P1-04.
-  if (!toolConfig.customizable) {
-    const err = `Tool '${toolName}' does not support --local`;
-    if (json) output({ action: 'add', mode: 'local', success: false, error: err }, { json });
-    else outputError(err, { json });
-    return { success: false };
-  }
-
-  const destination = join(projectRoot, 'tools', toolName);
-
-  if (existsSync(destination)) {
-    const err = `Tool already exists locally: tools/${toolName}`;
-    if (json) output({ action: 'add', mode: 'local', success: false, error: err }, { json });
-    else outputError(err, { json });
-    return { success: false };
-  }
-
-  await fse.copy(discovered.path, destination);
-
-  const result = {
-    action: 'add',
-    mode: 'local',
-    success: true,
-    tool: toolName,
-    destination: `tools/${toolName}`,
-  };
-
-  if (json) output(result, { json });
-  else outputSuccess(`Forked '${toolName}' to tools/${toolName}`, { json });
-
-  return result;
-}
+// (runLocal moved to src/commands/add/local.ts)
 
 // ---------------------------------------------------------------------------
 // Mode D: Project dependency (workspace package → target project)

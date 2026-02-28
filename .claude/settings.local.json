@@ -19,7 +19,8 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:ui.shadcn.com)",
       "Bash(npx tsc:*)",
-      "Bash(npm test:*)"
+      "Bash(npm test:*)",
+      "Bash(pnpm tsc:*)"
     ]
   }
 }

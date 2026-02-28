@@ -1,6 +1,6 @@
 project: "aikuora CLI"
 spec: ".aikuora/spec.yaml"
-current_phase: 0
+current_phase: 1
 
 phases:
   - id: 0
@@ -136,12 +136,12 @@ phases:
 
   - id: 1
     name: "Structural Refactoring — Split add.tsx"
-    status: pending
+    status: completed
     tasks:
       - id: P1-01
         title: "Extract workspace integration helpers to src/utils/workspace-integrations.ts"
         spec_ref: null
-        status: pending
+        status: completed
         note: >
           Create new file src/utils/workspace-integrations.ts.
           Move these functions from src/commands/add.tsx:
@@ -158,7 +158,7 @@ phases:
       - id: P1-02
         title: "Extract tsconfig/CSS/package helpers to src/utils/integration-patches.ts"
         spec_ref: null
-        status: pending
+        status: completed
         note: >
           Create new file src/utils/integration-patches.ts.
           Move these functions from src/commands/add.tsx:
@@ -174,7 +174,7 @@ phases:
       - id: P1-03
         title: "Extract runRoot + ensureRequiredTools to src/commands/add/root.ts"
         spec_ref: null
-        status: pending
+        status: completed
         note: >
           Create directory src/commands/add/ if needed.
           Create src/commands/add/root.ts.
@@ -191,7 +191,7 @@ phases:
       - id: P1-04
         title: "Extract runLocal to src/commands/add/local.ts"
         spec_ref: null
-        status: pending
+        status: completed
         note: >
           Create src/commands/add/local.ts.
           Move runLocal from add.tsx into this file.
@@ -206,7 +206,7 @@ phases:
       - id: P1-05
         title: "Extract buildToolExportPatterns + ensureConfigsEntry to src/commands/add/configs-entry.ts"
         spec_ref: null
-        status: pending
+        status: completed
         note: >
           Create src/commands/add/configs-entry.ts.
           Move buildToolExportPatterns and ensureConfigsEntry from add.tsx.
@@ -222,7 +222,7 @@ phases:
       - id: P1-06
         title: "Extract runShareable to src/commands/add/shareable.ts"
         spec_ref: null
-        status: pending
+        status: completed
         note: >
           Create src/commands/add/shareable.ts.
           Move runShareable from add.tsx into this file.
@@ -239,7 +239,7 @@ phases:
       - id: P1-07
         title: "Extract runLink to src/commands/add/link.ts"
         spec_ref: null
-        status: pending
+        status: completed
         note: >
           Create src/commands/add/link.ts.
           Move runLink from add.tsx into this file.
@@ -257,7 +257,7 @@ phases:
       - id: P1-08
         title: "Extract ensureWorkspacePackage + runScaffold to src/commands/add/scaffold.ts"
         spec_ref: null
-        status: pending
+        status: completed
         note: >
           Create src/commands/add/scaffold.ts.
           Move ensureWorkspacePackage and runScaffold from add.tsx.
@@ -275,7 +275,7 @@ phases:
       - id: P1-09
         title: "Extract runProjectDependency to src/commands/add/project-dep.ts + slim add.tsx"
         spec_ref: null
-        status: pending
+        status: completed
         note: >
           Create src/commands/add/project-dep.ts.
           Move runProjectDependency from add.tsx.

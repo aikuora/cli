@@ -36,7 +36,7 @@ export async function runProjectDependency(
   }
 
   const rootConfig = configResult.data!;
-  const scope = rootConfig.project.scope;
+  const scope = rootConfig.scope;
 
   const targetDir = resolve(projectRoot, target);
 

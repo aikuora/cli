@@ -1,16 +1,8 @@
 import { z } from 'zod';
 
 /**
- * Zod schemas for root configuration file (aikuora.config.yaml)
+ * Zod schemas for root configuration file (aikuora.workspace.yml)
  */
-
-export const projectConfigSchema = z.object({
-  name: z.string().min(1, 'Project name is required'),
-  scope: z
-    .string()
-    .regex(/^@[a-z0-9-]+$/, 'Scope must be a valid npm scope (e.g., @my-project)')
-    .optional(),
-});
 
 export const structureConfigSchema = z.object({
   apps: z.string().default('apps'),
@@ -27,7 +19,10 @@ export const defaultsConfigSchema = z.object({
 });
 
 export const configSchema = z.object({
-  project: projectConfigSchema,
+  name: z.string().min(1, 'Workspace name is required'),
+  scope: z
+    .string()
+    .regex(/^@[a-z0-9-]+$/, 'Scope must match /^@[a-z0-9-]+$/'),
   structure: structureConfigSchema.default({
     apps: 'apps',
     packages: 'packages',
@@ -46,7 +41,6 @@ export const configSchema = z.object({
 /**
  * TypeScript types inferred from zod schemas
  */
-export type ProjectConfig = z.infer<typeof projectConfigSchema>;
 export type StructureConfig = z.infer<typeof structureConfigSchema>;
 export type DefaultsConfig = z.infer<typeof defaultsConfigSchema>;
 export type Config = z.infer<typeof configSchema>;

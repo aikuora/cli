@@ -12,8 +12,8 @@ export interface ProjectInfo {
   /** Absolute path to the project directory */
   path: string;
   /** Scaffold tool used to create this project (e.g. "nextjs", "expo") */
-  tool: string;
-  type: 'app' | 'package' | 'module';
+  scaffold_tool?: string;
+  kind: 'app' | 'package' | 'module' | 'shareable';
   /** npm scope from workspace config (e.g. "\@my-project") */
   scope?: string;
 }

@@ -294,12 +294,12 @@ phases:
 
   - id: 2
     name: "Spec Alignment Fixes"
-    status: pending
+    status: completed
     tasks:
       - id: P2-01
         title: "Align configSchema — move name/scope to top level (ADR-004)"
         spec_ref: "behaviors.STARTUP-001"
-        status: pending
+        status: completed
         note: >
           Update src/types/config.ts: remove the `project` sub-object; add
           top-level `name: z.string().min(1)` and
@@ -318,7 +318,7 @@ phases:
       - id: P2-02
         title: "Update projectFileSchema — add shareable kind, name, scaffold_tool, tools, dependencies"
         spec_ref: "behaviors.ADD-001"
-        status: pending
+        status: completed
         note: >
           Update src/types/project.ts: add `kind: z.enum(['app','package','module','shareable'])`,
           add `name: z.string()`, rename `tool` to `scaffold_tool` (or add `scaffold_tool`
@@ -334,7 +334,7 @@ phases:
       - id: P2-03
         title: "Fix scanCustomTools — use basename not dirname for tool name"
         spec_ref: "behaviors.TOOL-001"
-        status: pending
+        status: completed
         note: >
           In src/core/scanner.ts, scanCustomTools() uses
           `dirname(absolutePath).split('/').pop()` to derive the tool name.
@@ -346,7 +346,7 @@ phases:
       - id: P2-04
         title: "Fix runLocal — remove customizable gate; any built-in tool can be forked"
         spec_ref: "behaviors.ADD-005"
-        status: pending
+        status: completed
         note: >
           In src/commands/add.tsx (or src/commands/add/local.ts after P1-04),
           runLocal() checks `toolConfig.customizable` before allowing the fork.
@@ -361,7 +361,7 @@ phases:
       - id: P2-05
         title: "Implement INIT-001 nested workspace prevention"
         spec_ref: "behaviors.INIT-001"
-        status: pending
+        status: completed
         note: >
           In src/commands/init.tsx, before writing any files, call
           findConfigPath(cwd). If it returns a non-null path, abort with:
@@ -375,7 +375,7 @@ phases:
       - id: P2-06
         title: "Implement variant required error in runLink (ADD-002)"
         spec_ref: "behaviors.ADD-002"
-        status: pending
+        status: completed
         note: >
           In src/commands/add/link.ts (after P1-07) runLink(): when link.variants
           is non-empty and no --variant flag is given, check if any variant has
@@ -388,7 +388,7 @@ phases:
       - id: P2-07
         title: "Implement re-link warning in runLink (ADD-002 side_effects)"
         spec_ref: "behaviors.ADD-002"
-        status: pending
+        status: completed
         note: >
           In src/commands/add/link.ts (after P1-07) runLink(): read the existing
           project file before applying. If the top-level toolName already appears
@@ -402,7 +402,7 @@ phases:
       - id: P2-08
         title: "Implement VSCode key conflict warning in mergeVscodeSettings (WS-001)"
         spec_ref: "behaviors.WS-001"
-        status: pending
+        status: completed
         note: >
           Create a new mergeVscodeSettings(filePath, patch) function in
           src/utils/workspace-integrations.ts (after P1-01).
@@ -417,7 +417,7 @@ phases:
       - id: P2-09
         title: "Implement scaffold cleanup on partial failure (ADD-001, ADD-003)"
         spec_ref: "behaviors.ADD-001"
-        status: pending
+        status: completed
         note: >
           In src/commands/add/scaffold.ts (after P1-08) runScaffold() and in
           src/commands/add/shareable.ts (after P1-06) runShareable():
@@ -434,7 +434,7 @@ phases:
       - id: P2-10
         title: "Fix bare add with nonexistent tool — return 'Tool not found in registry'"
         spec_ref: "behaviors.TOOL-001"
-        status: pending
+        status: completed
         note: >
           In src/commands/add.tsx addCommand(): when no target, no name, no local
           flag AND the tool is not found (discovered is null), the current code

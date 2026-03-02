@@ -59,9 +59,10 @@ export async function runRoot(options: AddOptions): Promise<{ success: boolean }
   const templateDir = join(discovered.path, 'template');
   if (existsSync(templateDir)) {
     const context = {
+      name: rootConfig.name,
+      scope: rootConfig.scope,
       structure: rootConfig.structure,
       defaults: rootConfig.defaults,
-      project: rootConfig.project,
     };
     await renderAndCopy(templateDir, projectRoot, context as Record<string, unknown>, {
       skipExisting: true,

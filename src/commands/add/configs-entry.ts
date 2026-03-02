@@ -143,9 +143,11 @@ export async function ensureConfigsEntry(
   // ── Step 3: Write aikuora.project.yml for packages/configs/ once ─────────
   if (!existsSync(join(configsPkgDir, 'aikuora.project.yml'))) {
     await writeProjectFile(configsPkgDir, {
-      tool: 'configs',
-      type: 'package',
-      dependencies: { tools: [], projects: [] },
+      kind: 'package',
+      name: 'configs',
+      scaffold_tool: 'configs',
+      tools: [],
+      dependencies: [],
     });
   }
 

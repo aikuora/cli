@@ -2,8 +2,7 @@ import { existsSync, readFileSync } from 'fs';
 import { writeFile } from 'fs/promises';
 import { join } from 'path';
 
-import { stringify } from 'yaml';
-import { parse } from 'yaml';
+import { parse, stringify } from 'yaml';
 
 import { projectFileSchema, type ProjectFile } from '../types/project.js';
 
@@ -36,29 +35,29 @@ export async function writeProjectFile(dir: string, data: ProjectFile): Promise<
 }
 
 /**
- * Append a tool name to dependencies.tools in the project file.
+ * Append a tool name to tools[] in the project file.
  * No-op if the file doesn't exist or the tool is already listed.
  */
 export async function appendToolDependency(dir: string, tool: string): Promise<void> {
   const existing = readProjectFile(dir);
   if (!existing) return;
 
-  if (existing.dependencies.tools.includes(tool)) return;
+  if (existing.tools.includes(tool)) return;
 
-  existing.dependencies.tools.push(tool);
+  existing.tools.push(tool);
   await writeProjectFile(dir, existing);
 }
 
 /**
- * Append a project path to dependencies.projects in the project file.
+ * Append a project path to dependencies[] in the project file.
  * No-op if the file doesn't exist or the path is already listed.
  */
 export async function appendProjectDependency(dir: string, projectPath: string): Promise<void> {
   const existing = readProjectFile(dir);
   if (!existing) return;
 
-  if (existing.dependencies.projects.includes(projectPath)) return;
+  if (existing.dependencies.includes(projectPath)) return;
 
-  existing.dependencies.projects.push(projectPath);
+  existing.dependencies.push(projectPath);
   await writeProjectFile(dir, existing);
 }

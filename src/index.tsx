@@ -86,6 +86,20 @@ function App() {
       return <Text color="red">Error: --name is required for init command</Text>;
     }
 
+    if (!scope) {
+      if (json) {
+        console.log(
+          JSON.stringify({
+            action: 'init',
+            success: false,
+            error: '--scope is required for init command',
+          })
+        );
+        process.exit(1);
+      }
+      return <Text color="red">Error: --scope is required for init command</Text>;
+    }
+
     // Run init command asynchronously
     initCommand({ name, scope, json })
       .then((result) => {

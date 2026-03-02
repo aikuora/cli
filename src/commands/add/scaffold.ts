@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from 'fs';
 import { writeFile } from 'fs/promises';
 import { join, resolve } from 'path';
 
+import fse from 'fs-extra';
+
 import { loadToolConfig } from '../../core/loader.js';
 import { resolveTool } from '../../core/resolver.js';
 import { scanAllTools } from '../../core/scanner.js';
@@ -60,7 +62,7 @@ export async function ensureWorkspacePackage(
       : rootConfig.structure.modules;
 
   const targetDir = join(projectRoot, typeDir, pkgToolName);
-  const scope = rootConfig.project.scope;
+  const scope = rootConfig.scope;
   const scopedName = scope ? `${scope}/${pkgToolName}` : pkgToolName;
 
   if (!existsSync(targetDir)) {
@@ -125,7 +127,7 @@ export async function runScaffold(options: AddOptions) {
     return { success: false };
   }
 
-  const scope = rootConfig.project.scope;
+  const scope = rootConfig.scope;
   const scopedName = scope ? `${scope}/${appName}` : appName!;
 
   const templateContext = {
@@ -138,124 +140,149 @@ export async function runScaffold(options: AddOptions) {
     year: new Date().getFullYear(),
   };
 
-  const templateDir = join(discovered.path, 'templates');
-  if (existsSync(templateDir)) {
-    await renderAndCopy(templateDir, targetDir, templateContext);
-  }
-
-  const moonConfig = buildMoonConfig(scaffold.moonTasks, toolConfig.lang ?? undefined, scaffold.tags);
-  await writeMoonYml(join(targetDir, 'moon.yml'), moonConfig);
-
-  // Apply workspace-level integrations declared by the scaffold tool itself
-  // (e.g. ui writes .moon/tasks/shadcn.yml via workspace.moon)
-  if (toolConfig.workspace) {
-    await applyWorkspaceSettings(projectRoot, toolConfig.workspace, toolName);
-  }
-
-  if (Object.keys(toolConfig.prototools).length > 0) {
-    await updatePrototools(join(projectRoot, '.prototools'), toolConfig.prototools);
-  }
-
-  // Auto-link devtools
-  const linkedTools: string[] = [];
-  for (const devToolEntry of scaffold.devtools) {
-    const devToolName = typeof devToolEntry === 'string' ? devToolEntry : devToolEntry.tool;
-    const devToolVariant = typeof devToolEntry === 'string' ? undefined : devToolEntry.variant;
-    const linkResult = await runLink({
-      ...options,
-      toolName: devToolName,
-      variant: devToolVariant,
-      target: join(typeDir, appName!),
-      name: undefined,
-      local: false,
-    });
-    if (linkResult.success) {
-      linkedTools.push(devToolName);
+  try {
+    const templateDir = join(discovered.path, 'templates');
+    if (existsSync(templateDir)) {
+      await renderAndCopy(templateDir, targetDir, templateContext);
     }
-  }
 
-  // Auto-scaffold workspace packages and wire them as dependencies
-  const packagedTools: string[] = [];
-  for (const pkgToolName of scaffold.packages ?? []) {
-    const pkgResult = await ensureWorkspacePackage(pkgToolName, options, projectRoot, rootConfig);
-    if (pkgResult.success) {
-      packagedTools.push(pkgToolName);
+    const moonConfig = buildMoonConfig(scaffold.moonTasks, toolConfig.lang ?? undefined, scaffold.tags);
+    await writeMoonYml(join(targetDir, 'moon.yml'), moonConfig);
 
-      // Add as runtime dependency in package.json
-      const targetPkgPath = join(targetDir, 'package.json');
-      if (existsSync(targetPkgPath)) {
-        const targetPkg = readJsonFile<Record<string, unknown>>(targetPkgPath);
-        const deps = (targetPkg.dependencies as Record<string, string>) ?? {};
-        if (!(pkgResult.scopedName in deps)) {
-          deps[pkgResult.scopedName] = 'workspace:*';
-          targetPkg.dependencies = sortDeps(deps);
-          await writeFile(targetPkgPath, JSON.stringify(targetPkg, null, 2) + '\n', 'utf-8');
-        }
-      }
+    // Apply workspace-level integrations declared by the scaffold tool itself
+    // (e.g. ui writes .moon/tasks/shadcn.yml via workspace.moon)
+    if (toolConfig.workspace) {
+      await applyWorkspaceSettings(projectRoot, toolConfig.workspace, toolName);
+    }
 
-      // Add a TypeScript project reference so the app can consume the workspace package
-      const refPath = `../../${rootConfig.structure.packages}/${pkgToolName}`;
-      await patchTsconfigReferences(join(targetDir, 'tsconfig.json'), refPath);
+    if (Object.keys(toolConfig.prototools).length > 0) {
+      await updatePrototools(join(projectRoot, '.prototools'), toolConfig.prototools);
+    }
 
-      // Inject CSS import if the app declares a cssEntry and the package exports a globals.css
-      if (scaffold.cssEntry) {
-        const pkgGlobalsPath = join(
-          projectRoot,
-          rootConfig.structure.packages,
-          pkgToolName,
-          'src', 'styles', 'globals.css'
-        );
-        if (existsSync(pkgGlobalsPath)) {
-          await injectCssImport(join(targetDir, scaffold.cssEntry), pkgResult.scopedName);
-        }
+    // Auto-link devtools
+    const linkedTools: string[] = [];
+    for (const devToolEntry of scaffold.devtools) {
+      const devToolName = typeof devToolEntry === 'string' ? devToolEntry : devToolEntry.tool;
+      const devToolVariant = typeof devToolEntry === 'string' ? undefined : devToolEntry.variant;
+      const linkResult = await runLink({
+        ...options,
+        toolName: devToolName,
+        variant: devToolVariant,
+        target: join(typeDir, appName!),
+        name: undefined,
+        local: false,
+      });
+      if (linkResult.success) {
+        linkedTools.push(devToolName);
       }
     }
-  }
 
-  // Write aikuora.project.yml — must happen before integration handlers,
-  // which read this file to resolve the target tool name.
-  await writeProjectFile(targetDir, {
-    tool: toolName,
-    type: scaffold.type,
-    dependencies: { tools: linkedTools, projects: packagedTools },
-  });
+    // Auto-scaffold workspace packages and wire them as dependencies
+    const packagedTools: string[] = [];
+    for (const pkgToolName of scaffold.packages ?? []) {
+      const pkgResult = await ensureWorkspacePackage(pkgToolName, options, projectRoot, rootConfig);
+      if (pkgResult.success) {
+        packagedTools.push(pkgToolName);
 
-  // Invoke integration handlers for each wired workspace package.
-  // Both aikuora.project.yml files now exist so invokeIntegrationHandler can resolve them.
-  for (const pkgToolName of packagedTools) {
-    const pkgAbsPath = join(projectRoot, rootConfig.structure.packages, pkgToolName);
-    const pkgRelPath = `${rootConfig.structure.packages}/${pkgToolName}`;
-    const pkgScopedName = rootConfig.project.scope
-      ? `${rootConfig.project.scope}/${pkgToolName}`
-      : pkgToolName;
-    await invokeIntegrationHandler({
-      sourceDir: pkgAbsPath,
-      targetDir,
-      sourceName: pkgRelPath,
-      scopedName: pkgScopedName,
-      tools: resolved.tools,
-      workspaceRoot: projectRoot,
-      scope: rootConfig.project.scope,
+        // Add as runtime dependency in package.json
+        const targetPkgPath = join(targetDir, 'package.json');
+        if (existsSync(targetPkgPath)) {
+          const targetPkg = readJsonFile<Record<string, unknown>>(targetPkgPath);
+          const deps = (targetPkg.dependencies as Record<string, string>) ?? {};
+          if (!(pkgResult.scopedName in deps)) {
+            deps[pkgResult.scopedName] = 'workspace:*';
+            targetPkg.dependencies = sortDeps(deps);
+            await writeFile(targetPkgPath, JSON.stringify(targetPkg, null, 2) + '\n', 'utf-8');
+          }
+        }
+
+        // Add a TypeScript project reference so the app can consume the workspace package
+        const refPath = `../../${rootConfig.structure.packages}/${pkgToolName}`;
+        await patchTsconfigReferences(join(targetDir, 'tsconfig.json'), refPath);
+
+        // Inject CSS import if the app declares a cssEntry and the package exports a globals.css
+        if (scaffold.cssEntry) {
+          const pkgGlobalsPath = join(
+            projectRoot,
+            rootConfig.structure.packages,
+            pkgToolName,
+            'src', 'styles', 'globals.css'
+          );
+          if (existsSync(pkgGlobalsPath)) {
+            await injectCssImport(join(targetDir, scaffold.cssEntry), pkgResult.scopedName);
+          }
+        }
+      }
+    }
+
+    // Write aikuora.project.yml — must happen before integration handlers,
+    // which read this file to resolve the target tool name.
+    await writeProjectFile(targetDir, {
+      kind: scaffold.type,
+      name: appName,
+      scaffold_tool: toolName,
+      tools: linkedTools,
+      dependencies: packagedTools,
     });
+
+    // Invoke integration handlers for each wired workspace package.
+    // Both aikuora.project.yml files now exist so invokeIntegrationHandler can resolve them.
+    for (const pkgToolName of packagedTools) {
+      const pkgAbsPath = join(projectRoot, rootConfig.structure.packages, pkgToolName);
+      const pkgRelPath = `${rootConfig.structure.packages}/${pkgToolName}`;
+      const pkgScopedName = rootConfig.scope
+        ? `${rootConfig.scope}/${pkgToolName}`
+        : pkgToolName;
+      await invokeIntegrationHandler({
+        sourceDir: pkgAbsPath,
+        targetDir,
+        sourceName: pkgRelPath,
+        scopedName: pkgScopedName,
+        tools: resolved.tools,
+        workspaceRoot: projectRoot,
+        scope: rootConfig.scope,
+      });
+    }
+
+    const moonTasksCreated = scaffold.moonTasks.map((t: MoonTask) => t.name);
+
+    const result = {
+      action: 'add',
+      mode: 'scaffold',
+      success: true,
+      tool: toolName,
+      name: appName,
+      path: join(typeDir, appName!),
+      linkedTools,
+      packagedTools,
+      prototoolsUpdated: Object.keys(toolConfig.prototools).length > 0,
+      moonTasksCreated,
+    };
+
+    if (json) output(result, { json });
+    else outputSuccess(`Scaffolded ${toolName} app '${appName}' at ${join(typeDir, appName!)}`, { json });
+
+    return result;
+  } catch (caught) {
+    const error = caught instanceof Error ? caught.message : String(caught);
+    if (existsSync(targetDir)) {
+      try {
+        await fse.remove(targetDir);
+        if (json) output({ action: 'add', mode: 'scaffold', success: false, error }, { json });
+        else outputError(error, { json });
+      } catch (cleanupCaught) {
+        const cleanupError = cleanupCaught instanceof Error ? cleanupCaught.message : String(cleanupCaught);
+        if (json) {
+          output({ action: 'add', mode: 'scaffold', success: false, error, cleanupError, manualCleanupRequired: true, partialPath: targetDir }, { json });
+        } else {
+          outputError(error, { json });
+          outputError(`Cleanup failed: ${cleanupError}. Please delete ${targetDir} manually.`, { json });
+        }
+      }
+    } else {
+      if (json) output({ action: 'add', mode: 'scaffold', success: false, error }, { json });
+      else outputError(error, { json });
+    }
+    return { success: false };
   }
-
-  const moonTasksCreated = scaffold.moonTasks.map((t: MoonTask) => t.name);
-
-  const result = {
-    action: 'add',
-    mode: 'scaffold',
-    success: true,
-    tool: toolName,
-    name: appName,
-    path: join(typeDir, appName!),
-    linkedTools,
-    packagedTools,
-    prototoolsUpdated: Object.keys(toolConfig.prototools).length > 0,
-    moonTasksCreated,
-  };
-
-  if (json) output(result, { json });
-  else outputSuccess(`Scaffolded ${toolName} app '${appName}' at ${join(typeDir, appName!)}`, { json });
-
-  return result;
 }

@@ -9,7 +9,7 @@ import { addMoonTask } from '../../utils/moon.js';
 import { output, outputError, outputSuccess } from '../../utils/output.js';
 import { sortDeps } from '../../utils/integration-patches.js';
 import { applyWorkspaceSettings } from '../../utils/workspace-integrations.js';
-import { appendToolDependency } from '../../utils/project-file.js';
+import { appendToolDependency, readProjectFile } from '../../utils/project-file.js';
 import type { AddOptions } from '../add.js';
 import { ensureConfigsEntry } from './configs-entry.js';
 import { ensureRequiredTools } from './root.js';
@@ -29,7 +29,7 @@ function readJsonFile<T extends Record<string, unknown>>(p: string): T {
 // ---------------------------------------------------------------------------
 
 export async function runLink(options: AddOptions) {
-  const { toolName, target, variant: variantFlag, json, cwd = process.cwd() } = options;
+  const { toolName, target, variant: variantFlag, json, silent, cwd = process.cwd() } = options;
   const projectRoot = resolve(cwd);
 
   const configResult = readConfig();
@@ -67,18 +67,24 @@ export async function runLink(options: AddOptions) {
   const linkConfig = toolConfig.link;
   const variants = linkConfig.variants ?? [];
 
-  // Resolve variant: --variant flag → default → first
+  // Resolve variant: --variant flag → default → error if no default
   let resolvedVariant: string | null = null;
   let resolvedVariantObj: (typeof variants)[0] | undefined;
   if (variantFlag) {
     resolvedVariantObj = variants.find((v) => v.name === variantFlag);
     resolvedVariant = resolvedVariantObj?.name ?? variantFlag;
-  } else {
-    resolvedVariantObj = variants.find((v) => v.default) ?? variants[0];
-    resolvedVariant = resolvedVariantObj?.name ?? null;
+  } else if (variants.length > 0) {
+    resolvedVariantObj = variants.find((v) => v.default);
+    if (!resolvedVariantObj) {
+      const err = `Tool '${toolName}' requires a variant. Available variants: ${variants.map((v) => v.name).join(', ')}`;
+      if (json) output({ action: 'add', mode: 'link', success: false, error: err }, { json });
+      else outputError(err, { json });
+      return { success: false };
+    }
+    resolvedVariant = resolvedVariantObj.name;
   }
 
-  const scope = rootConfig.project.scope;
+  const scope = rootConfig.scope;
 
   // For shareable tools, ensure the shared package exists before linking
   let packageName: string | undefined;
@@ -101,6 +107,17 @@ export async function runLink(options: AddOptions) {
   const rendered = templateSource({ scope, variant: resolvedVariant, packageName });
 
   const targetPath = resolve(projectRoot, target!);
+
+  // ADD-002: warn if tool is already linked (skip for transitive requires)
+  if (!silent) {
+    const existing = readProjectFile(targetPath);
+    if (existing?.tools.includes(toolName)) {
+      process.stderr.write(
+        `Warning: tool '${toolName}' is already linked to this project. Re-applying.\n`
+      );
+    }
+  }
+
   await mkdir(targetPath, { recursive: true });
   await writeFile(join(targetPath, linkConfig.targetFile), rendered, 'utf-8');
 

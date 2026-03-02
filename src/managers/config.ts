@@ -155,12 +155,10 @@ export function writeConfig(config: Config, configPath: string): ConfigResult {
 /**
  * Create a default config with the given project name and scope
  */
-export function createDefaultConfig(name: string, scope?: string): Config {
+export function createDefaultConfig(name: string, scope: string): Config {
   return {
-    project: {
-      name,
-      scope,
-    },
+    name,
+    scope,
     structure: {
       apps: 'apps',
       packages: 'packages',

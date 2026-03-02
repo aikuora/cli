@@ -74,13 +74,18 @@ export async function addCommand(options: AddOptions) {
 
   // No target, no name, no local — detect from tool kind
   const discovered = resolveTool(toolName, tools);
-  if (discovered) {
-    const loaderResult = loadToolConfig(discovered.path);
-    if (loaderResult.success) {
-      const kind = loaderResult.data?.kind;
-      if (kind === 'shareable') return runShareable(options);
-      if (kind === 'root') return runRoot(options);
-    }
+  if (!discovered) {
+    const err = `Tool '${toolName}' not found in registry`;
+    if (json) output({ action: 'add', success: false, error: err }, { json });
+    else outputError(err, { json });
+    return { success: false };
+  }
+
+  const loaderResult = loadToolConfig(discovered.path);
+  if (loaderResult.success) {
+    const kind = loaderResult.data?.kind;
+    if (kind === 'shareable') return runShareable(options);
+    if (kind === 'root') return runRoot(options);
   }
 
   const err =

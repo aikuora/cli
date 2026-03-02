@@ -7,12 +7,12 @@ describe('Config Manager', () => {
     it('should create a default config with name and scope', () => {
       const config = createDefaultConfig('test-project', '@test');
 
-      expect(config.project.name).toBe('test-project');
-      expect(config.project.scope).toBe('@test');
+      expect(config.name).toBe('test-project');
+      expect(config.scope).toBe('@test');
     });
 
     it('should use default structure values', () => {
-      const config = createDefaultConfig('test');
+      const config = createDefaultConfig('test', '@test');
 
       expect(config.structure.apps).toBe('apps');
       expect(config.structure.packages).toBe('packages');
@@ -21,7 +21,7 @@ describe('Config Manager', () => {
     });
 
     it('should use default runtime versions', () => {
-      const config = createDefaultConfig('test');
+      const config = createDefaultConfig('test', '@test');
 
       expect(config.defaults.node).toBe('lts');
       expect(config.defaults.pnpm).toBe('latest');
@@ -30,7 +30,7 @@ describe('Config Manager', () => {
     });
 
     it('should have empty customTools array', () => {
-      const config = createDefaultConfig('test');
+      const config = createDefaultConfig('test', '@test');
 
       expect(config.customTools).toEqual([]);
     });

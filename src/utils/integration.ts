@@ -44,20 +44,20 @@ export async function invokeIntegrationHandler(options: InvokeOptions): Promise<
 
   if (!sourceProject || !targetProject) return false;
 
-  const sourceTool = resolveTool(sourceProject.tool, tools);
+  const sourceTool = resolveTool(sourceProject.scaffold_tool ?? '', tools);
   if (!sourceTool) return false;
 
   const toolConfigResult = loadToolConfig(sourceTool.path);
   if (!toolConfigResult.success || !toolConfigResult.data?.dependents) return false;
 
-  const handlerEntry = toolConfigResult.data.dependents[targetProject.tool];
+  const handlerEntry = toolConfigResult.data.dependents[targetProject.scaffold_tool ?? ''];
   if (!handlerEntry) return false;
 
   const ctx: IntegrationContext = {
     target: {
       path: targetDir,
-      tool: targetProject.tool,
-      type: targetProject.type,
+      scaffold_tool: targetProject.scaffold_tool,
+      kind: targetProject.kind,
       scope,
     },
     source: {

@@ -28,6 +28,23 @@ export async function mergeJsonFile(
   await writeFile(filePath, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
 }
 
+export async function mergeVscodeSettings(
+  filePath: string,
+  patch: Record<string, unknown>
+): Promise<void> {
+  const existing = readJsonFile<Record<string, unknown>>(filePath);
+  for (const [key, newVal] of Object.entries(patch)) {
+    if (key in existing && JSON.stringify(existing[key]) !== JSON.stringify(newVal)) {
+      process.stderr.write(
+        `Warning: VSCode setting '${key}' overwritten (was: ${JSON.stringify(existing[key])}, now: ${JSON.stringify(newVal)})\n`
+      );
+    }
+    existing[key] = newVal;
+  }
+  await mkdir(join(filePath, '..'), { recursive: true });
+  await writeFile(filePath, JSON.stringify(existing, null, 2) + '\n', 'utf-8');
+}
+
 export async function mergeClaudeHooks(
   filePath: string,
   hooks: Record<string, Array<{ matcher: string; hooks: Array<{ type: string; command: string }> }>>
@@ -102,7 +119,7 @@ export async function applyWorkspaceSettings(
   toolName?: string
 ): Promise<void> {
   if (workspace.vscode?.settings) {
-    await mergeJsonFile(
+    await mergeVscodeSettings(
       join(projectRoot, '.vscode', 'settings.json'),
       workspace.vscode.settings
     );

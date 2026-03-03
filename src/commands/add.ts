@@ -1,8 +1,6 @@
 import { existsSync } from 'fs';
 import { resolve } from 'path';
 
-import { Text } from 'ink';
-
 import { loadToolConfig } from '../core/loader.js';
 import { resolveTool } from '../core/resolver.js';
 import { scanAllTools } from '../core/scanner.js';
@@ -99,54 +97,4 @@ export async function addCommand(options: AddOptions) {
   if (json) output({ action: 'add', success: false, error: err }, { json });
   else outputError(err, { json });
   return { success: false };
-}
-
-// ---------------------------------------------------------------------------
-// Ink component
-// ---------------------------------------------------------------------------
-
-export function AddCommand({
-  mode,
-  toolName,
-  name,
-  target,
-}: {
-  mode: 'scaffold' | 'link' | 'local' | 'project' | 'root-or-shareable';
-  toolName: string;
-  name?: string;
-  target?: string;
-}) {
-  if (mode === 'scaffold') {
-    return (
-      <Text color="cyan">
-        Scaffolding {toolName} app: {name}
-      </Text>
-    );
-  }
-
-  if (mode === 'link') {
-    return (
-      <Text color="cyan">
-        Linking {toolName} to {target}
-      </Text>
-    );
-  }
-
-  if (mode === 'project') {
-    return (
-      <Text color="cyan">
-        Adding {toolName} as dependency of {target}
-      </Text>
-    );
-  }
-
-  if (mode === 'root-or-shareable') {
-    return <Text color="cyan">Installing {toolName}…</Text>;
-  }
-
-  return (
-    <Text color="cyan">
-      Forking {toolName} to tools/{toolName}
-    </Text>
-  );
 }

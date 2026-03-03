@@ -1,4 +1,5 @@
 name: ui
+description: "Shared UI component library (shadcn/ui)"
 kind: none
 lang: typescript
 requires:

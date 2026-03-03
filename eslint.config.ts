@@ -1,6 +1,4 @@
 import eslint from '@eslint/js';
-import react from 'eslint-plugin-react';
-import reactHooks from 'eslint-plugin-react-hooks';
 import tsdoc from 'eslint-plugin-tsdoc';
 import vitest from 'eslint-plugin-vitest';
 import tseslint from 'typescript-eslint';
@@ -27,8 +25,6 @@ export default [
       },
     },
     plugins: {
-      react,
-      'react-hooks': reactHooks,
       tsdoc,
     },
     rules: {
@@ -36,18 +32,8 @@ export default [
       '@typescript-eslint/consistent-type-imports': 'error',
       '@typescript-eslint/consistent-type-exports': 'error',
 
-      // React/Ink rules
-      'react/react-in-jsx-scope': 'off',
-      'react/prop-types': 'off',
-      ...reactHooks.configs.recommended.rules,
-
       // TSDoc - warn for public API
       'tsdoc/syntax': 'warn',
-    },
-    settings: {
-      react: {
-        version: '18.3',
-      },
     },
   },
 

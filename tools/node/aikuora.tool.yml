@@ -1,4 +1,5 @@
 name: node
+description: "Node.js runtime managed by proto"
 kind: root
 installer: proto
 version: lts

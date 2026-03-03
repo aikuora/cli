@@ -482,12 +482,12 @@ phases:
 
   - id: 4
     name: "New Commands: info and list"
-    status: pending
+    status: completed
     tasks:
       - id: P4-01
         title: "Create project scanner utility (used by INFO-001 and LIST-001)"
         spec_ref: "behaviors.INFO-001"
-        status: pending
+        status: done
         depends_on: ["P2-02"]
         note: >
           Create src/utils/project-scanner.ts with scanProjects(workspaceRoot, structure).
@@ -506,7 +506,7 @@ phases:
       - id: P4-02
         title: "Implement aikuora info command (INFO-001)"
         spec_ref: "behaviors.INFO-001"
-        status: pending
+        status: done
         depends_on: ["P3-01", "P4-01"]
         note: >
           Create src/commands/info.tsx with infoCommand(options) and InfoCommand component.
@@ -525,7 +525,7 @@ phases:
       - id: P4-03
         title: "Implement aikuora list command (LIST-001)"
         spec_ref: "behaviors.LIST-001"
-        status: pending
+        status: done
         depends_on: ["P3-01", "P4-01"]
         note: >
           Create src/commands/list.tsx with listCommand(options) and ListCommand component.

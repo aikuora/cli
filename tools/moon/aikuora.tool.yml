@@ -1,4 +1,5 @@
 name: moon
+description: "Moon build system and task runner"
 kind: root
 installer: proto
 version: latest

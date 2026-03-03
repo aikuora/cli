@@ -187,6 +187,8 @@ export const dependentEntrySchema = z.union([
 
 export const toolConfigSchema = z.object({
   name: z.string(),
+  /** Short human-readable description of what this tool provides. */
+  description: z.string().optional(),
   /**
    * Determines how the tool is deployed in the workspace:
    * - `shareable` — creates a shared package in `packages/configs/` that dependents import from

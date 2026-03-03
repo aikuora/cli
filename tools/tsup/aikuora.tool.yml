@@ -1,4 +1,5 @@
 name: tsup
+description: "tsup bundler and build configuration"
 kind: shareable
 lang: typescript
 requires:

@@ -389,4 +389,37 @@
 
 ---
 
+### ADR-016: Remove Ink — Plain Node.js stdout/stderr
+
+- **Date:** 2026-03-02
+- **Status:** Accepted
+- **Supersedes:** ADR-002 (Ink + React 18 for Terminal UI)
+- **Context:** The CLI has no interactive features (no prompts, no spinners, no
+  live-updating UI). Ink was only rendering static one-line status messages
+  (`<Text color="cyan">Listing tools…</Text>`) while actual output was already
+  written via `console.log` / ANSI escape codes, bypassing Ink's render buffer
+  entirely. This created a split-output model with no real benefit, added React
+  and Ink to the dependency tree (174 packages), required JSX compilation, and
+  complicated the entry point with a `render(<App />)` wrapper around plain
+  async functions.
+- **Decision:** Remove `ink`, `react`, `@types/react`, `eslint-plugin-react`,
+  and `eslint-plugin-react-hooks`. Replace `render(<App />)` with a plain
+  `async main()` function. All human-readable output uses `console.log` with
+  ANSI escape codes where color is needed. JSON mode continues to use
+  `console.log(JSON.stringify(...))`. Command files renamed from `.tsx` to `.ts`;
+  `tsconfig.json` `jsx` option removed; tsup JSX esbuildOptions removed.
+- **Alternatives Considered:**
+  1. Keep Ink but only for future interactive features — rejected: premature;
+     Ink can be re-added if/when interactive prompts are actually needed.
+- **Consequences:**
+  - 174 fewer installed packages; faster install and smaller bundle.
+  - No JSX in the codebase; `eslint-plugin-react` / `eslint-plugin-react-hooks`
+    removed from lint config.
+  - `src/index.ts` is now a straightforward `async main()` with `if/else`
+    command routing — easier to read and test.
+  - If interactive prompts are needed in the future, `@inquirer/prompts` or
+    re-adding Ink are both valid options.
+
+---
+
 *Owner: Planner + Engineer*

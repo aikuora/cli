@@ -1,4 +1,5 @@
 name: nextjs
+description: "Next.js application scaffold"
 kind: none
 lang: typescript
 

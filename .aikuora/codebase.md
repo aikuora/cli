@@ -6,7 +6,7 @@
 
 CLI tool — Node.js 24+ with TypeScript 5, compiled to ESM via tsup, published as `@aikuora/cli`.
 
-- Terminal UI: Ink 5 + React 18 (human mode) / `console.log(JSON.stringify(...))` (--json mode)
+- Terminal UI: `console.log` + ANSI escape codes (human mode) / `console.log(JSON.stringify(...))` (--json mode)
 - CLI parsing: meow 13
 - Config validation: Zod 3
 - YAML parsing: yaml 2
@@ -19,7 +19,7 @@ CLI tool — Node.js 24+ with TypeScript 5, compiled to ESM via tsup, published 
 
 ```text
 src/
-  commands/       — one file per CLI subcommand (init.tsx, add.tsx; info.tsx and list.tsx to add)
+  commands/       — one file per CLI subcommand (init.ts, add.ts, info.ts, list.ts)
   core/           — tool discovery, loading, and resolution (scanner.ts, loader.ts, resolver.ts)
   managers/       — workspace config CRUD (config.ts reads/writes aikuora.workspace.yml)
   types/          — Zod schemas + inferred TypeScript types (config.ts, tool-config.ts, project.ts, tool.ts)
@@ -40,28 +40,22 @@ templates/
 
 ## Entry Points
 
-- CLI: `src/index.tsx` — parses args with meow, routes to command handlers, renders Ink component
-- Build output: `dist/index.js` — single bundle (tsup, external: react + ink)
+- CLI: `src/index.ts` — parses args with meow, routes to command handlers via plain `async main()`
+- Build output: `dist/index.js` — single bundle (tsup)
 - Tests: `vitest.config.ts` or inline; test files co-located as `*.test.ts`
 
 ## Code Patterns
 
 ### Command handler pattern
 
-Every command is split into two parts:
-
-1. An async function `<name>Command(options)` that contains all logic and returns
-   `{ success: boolean }`. It calls `output(...)` or `outputError(...)` internally.
-2. An Ink component `<Name>Command` that renders a status line for human mode.
+Each command is a single async function `<name>Command(options)` that contains
+all logic and returns `{ success: boolean }`. It calls `output(...)` or
+`outputError(...)` internally.
 
 ```typescript
-// In src/index.tsx:
-<name>Command({ ...flags, json })
-  .then((r) => { if (!r.success) process.exit(1); })
-  .catch(...)
-
-if (!json) return <NameCommand ... />;
-return null;
+// In src/index.ts (plain async main, no Ink):
+const result = await addCommand({ toolName, target, name, variant, local, json });
+if (!result.success) process.exit(1);
 ```
 
 ### Workspace validation pattern (STARTUP-001)
@@ -104,7 +98,7 @@ await appendToolDependency(targetDir, toolName);
 
 ### Workspace integration (declarative + JS handler)
 
-Workspace-level files are merged idempotently in `src/commands/add.tsx`:
+Workspace-level files are merged idempotently in `src/commands/add.ts`:
 
 - `.vscode/settings.json` via `mergeVscodeSettings` (with key conflict warnings)
 - `.vscode/extensions.json` via `mergeVscodeExtensions`
@@ -117,7 +111,7 @@ are dispatched via `invokeIntegrationHandler` in `src/utils/integration.ts`.
 
 ## Conventions
 
-- File names: `kebab-case.ts` for utilities, `kebab-case.tsx` for components/commands
+- File names: `kebab-case.ts` for all source files (no more `.tsx` — Ink removed)
 - TypeScript types: inferred from Zod (`z.infer<typeof schema>`); never declared separately
 - Exports: named exports only; no default exports from command files
 - Error returns: functions return `{ success: boolean }` — they never throw to callers;
@@ -130,21 +124,18 @@ are dispatched via `invokeIntegrationHandler` in `src/utils/integration.ts`.
 
 ## Active Context
 
-**Current task:** P3-02 complete (Phase 3 complete — STARTUP-001 Workspace Validation Guard done)
+**Current task:** Ink removed (ADR-016). Phase 4 complete, Phase 5 pending.
 
 **Relevant files:**
 
-- `/Users/ccosming/Github/aikuora/cli/src/utils/workspace.ts` — NEW: `validateWorkspace(cwd?)` returning `{ valid: true, config } | { valid: false, error }`. Uses `findConfigPath` + `readConfig`; extracts field-level Zod error messages for `name` and `scope`.
-- `/Users/ccosming/Github/aikuora/cli/src/utils/workspace.test.ts` — NEW: 9 unit tests (missing config, invalid YAML, empty/missing name, invalid/missing scope, valid config, walk-up).
-- `/Users/ccosming/Github/aikuora/cli/src/commands/add.tsx` — `validateWorkspace` wired as the first step in `addCommand`; `readConfig` import removed.
-- `/Users/ccosming/Github/aikuora/cli/src/commands/add/root.ts` — `readConfig` replaced with `validateWorkspace`.
-- `/Users/ccosming/Github/aikuora/cli/src/commands/add/shareable.ts` — `readConfig` replaced with `validateWorkspace`.
-- `/Users/ccosming/Github/aikuora/cli/src/commands/add/link.ts` — `readConfig` replaced with `validateWorkspace`.
-- `/Users/ccosming/Github/aikuora/cli/src/commands/add/scaffold.ts` — `readConfig` replaced with `validateWorkspace`.
-- `/Users/ccosming/Github/aikuora/cli/src/commands/add/project-dep.ts` — `readConfig` replaced with `validateWorkspace`.
+- `src/index.ts` — plain `async main()`, no Ink/React
+- `src/commands/{add,init,info,list}.ts` — renamed from `.tsx`, Ink components removed
+- `src/utils/workspace.ts` — `validateWorkspace()` — STARTUP-001 guard
+- `src/utils/project-scanner.ts` — `scanProjects()` walks structure dirs
+- `src/commands/info.ts` + `src/commands/list.ts` — INFO-001 and LIST-001 implemented
 
 **Recent discoveries:**
 
-- `validateWorkspace` extracts Zod field errors via a typed cast on `result.error?.details` (output of `error.format()`), accessing `details.name._errors[0]` and `details.scope._errors[0]`.
-- `init` command is intentionally exempt from `validateWorkspace` — it creates the workspace config, so it cannot pre-validate one.
-- `runLocal` requires no `validateWorkspace` call of its own because `addCommand` calls it first; `runLocal` only uses built-in tools (no config needed).
+- `Config['structure']` fields (`apps`, `packages`, `modules`) are plain strings. `scanProjects` uses `join(workspaceRoot, dir)` to form absolute paths.
+- `readPrototools` returns `{}` when file is absent; check `Object.keys(rawPins).length > 0` before including `runtimePins` in JSON output.
+- `list tools` loads each tool's `aikuora.tool.yml` via `loadToolConfig` to get `lang`, `kind`, `description`; renders a padded ANSI-colored table.

@@ -1,4 +1,5 @@
 name: tsconfig
+description: "Shared TypeScript compiler configuration"
 kind: shareable
 lang: typescript
 requires:

@@ -1,7 +1,5 @@
 import { resolve } from 'path';
 
-import { Text } from 'ink';
-
 import { createDefaultConfig, findConfigPath } from '../managers/config.js';
 import type { OutputOptions } from '../utils/output.js';
 import { output, outputError, outputSuccess } from '../utils/output.js';
@@ -82,10 +80,3 @@ export async function initCommand(options: InitOptions) {
   }
 }
 
-export function InitCommand({ name, scope }: { name: string; scope: string }) {
-  return (
-    <Text color="green">
-      Initializing monorepo: {name} {scope && `(${scope})`}
-    </Text>
-  );
-}

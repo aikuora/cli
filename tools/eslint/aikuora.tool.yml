@@ -1,4 +1,5 @@
 name: eslint
+description: "ESLint flat config with TypeScript support"
 kind: shareable
 lang: typescript
 requires:

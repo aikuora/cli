@@ -1,4 +1,5 @@
 name: pnpm
+description: "pnpm package manager and workspace setup"
 kind: root
 installer: proto
 version: latest

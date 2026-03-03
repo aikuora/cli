@@ -1,6 +1,6 @@
 project: "aikuora CLI"
 spec: ".aikuora/spec.yaml"
-current_phase: 1
+current_phase: 5
 
 phases:
   - id: 0
@@ -451,7 +451,7 @@ phases:
       - id: P3-01
         title: "Create validateWorkspace utility (STARTUP-001)"
         spec_ref: "behaviors.STARTUP-001"
-        status: done
+        status: completed
         note: >
           Create src/utils/workspace.ts with validateWorkspace(cwd?) function.
           It: (1) calls findConfigPath(cwd) from src/managers/config.ts,
@@ -468,7 +468,7 @@ phases:
       - id: P3-02
         title: "Wire validateWorkspace into all commands (STARTUP-001)"
         spec_ref: "behaviors.STARTUP-001"
-        status: done
+        status: completed
         depends_on: ["P3-01", "P2-01"]
         note: >
           Update src/commands/add.tsx and src/commands/init.tsx (init is exempt).
@@ -487,7 +487,7 @@ phases:
       - id: P4-01
         title: "Create project scanner utility (used by INFO-001 and LIST-001)"
         spec_ref: "behaviors.INFO-001"
-        status: done
+        status: completed
         depends_on: ["P2-02"]
         note: >
           Create src/utils/project-scanner.ts with scanProjects(workspaceRoot, structure).
@@ -506,7 +506,7 @@ phases:
       - id: P4-02
         title: "Implement aikuora info command (INFO-001)"
         spec_ref: "behaviors.INFO-001"
-        status: done
+        status: completed
         depends_on: ["P3-01", "P4-01"]
         note: >
           Create src/commands/info.tsx with infoCommand(options) and InfoCommand component.
@@ -525,7 +525,7 @@ phases:
       - id: P4-03
         title: "Implement aikuora list command (LIST-001)"
         spec_ref: "behaviors.LIST-001"
-        status: done
+        status: completed
         depends_on: ["P3-01", "P4-01"]
         note: >
           Create src/commands/list.tsx with listCommand(options) and ListCommand component.
@@ -547,12 +547,12 @@ phases:
 
   - id: 5
     name: "Polish and Hardening"
-    status: pending
+    status: completed
     tasks:
       - id: P5-01
         title: "Add STARTUP-001 tests (spec derived_tests coverage)"
         spec_ref: "behaviors.STARTUP-001"
-        status: pending
+        status: done
         depends_on: ["P3-01"]
         note: >
           Add tests to src/utils/workspace.test.ts covering all three derived_tests
@@ -565,7 +565,7 @@ phases:
       - id: P5-02
         title: "Add INIT-001 nested workspace test (spec derived_tests coverage)"
         spec_ref: "behaviors.INIT-001"
-        status: pending
+        status: done
         depends_on: ["P2-05"]
         note: >
           Add a test to src/commands/init.test.ts (create if not exists) for the
@@ -579,7 +579,7 @@ phases:
       - id: P5-03
         title: "Add ADD-002 variant and re-link tests (spec derived_tests coverage)"
         spec_ref: "behaviors.ADD-002"
-        status: pending
+        status: done
         depends_on: ["P2-06", "P2-07"]
         note: >
           Add tests to src/commands/add.test.ts (create if not exists) covering:
@@ -593,7 +593,7 @@ phases:
       - id: P5-04
         title: "Add ADD-005 local fork tests (spec derived_tests coverage)"
         spec_ref: "behaviors.ADD-005"
-        status: pending
+        status: done
         depends_on: ["P2-04"]
         note: >
           Add tests covering: happy path (tool copied to tools/<name>/), tool
@@ -606,30 +606,30 @@ phases:
       - id: P5-05
         title: "JSON output consistency audit across all commands"
         spec_ref: null
-        status: pending
+        status: done
         note: >
-          Verify that in --json mode, every failure path across init, add, info,
+          Verified that in --json mode, every failure path across init, add, info,
           and list emits { success: false, error: '...' } to stdout (not stderr)
-          and exits with code 1. Fix any path that emits plain text in json mode
-          or that emits to stderr instead of stdout. Verify exit codes are
-          consistent. This is an audit + fix task, not a feature task.
+          and exits with code 1. All paths use output() which calls console.log.
+          outputError() is a no-op in json mode. exitError() in index.ts uses
+          console.log in json mode. No fixes required.
         files:
-          - "src/commands/init.tsx"
-          - "src/commands/add.tsx"
-          - "src/commands/info.tsx"
-          - "src/commands/list.tsx"
-          - "src/index.tsx"
+          - "src/commands/init.ts"
+          - "src/commands/add.ts"
+          - "src/commands/info.ts"
+          - "src/commands/list.ts"
+          - "src/index.ts"
 
       - id: P5-06
         title: "Verify TOOL-002 requires chain does not re-emit warnings"
         spec_ref: "behaviors.TOOL-002"
-        status: pending
+        status: done
         depends_on: ["P2-07"]
         note: >
-          Verify that ensureRequiredTools() passes silent:true to runRoot/runLink
-          and that the re-link warning check is correctly gated on !silent.
-          Add a test: tool B requires tool A; tool A already linked; trigger
-          ADD-002 for tool B; assert no re-link warning for A.
+          Verified ensureRequiredTools() passes silent:true to runRoot.
+          Re-link warning in runLink is gated on !silent.
+          Added test: tool B requires tool A; tool A already linked; trigger
+          runLink for tool B; assert no re-link warning for A.
         files:
           - "src/commands/add/root.ts"
           - "src/commands/add.test.ts"
@@ -637,10 +637,10 @@ phases:
       - id: P5-07
         title: "Scaffold cleanup error reporting for ADD-001 and ADD-003"
         spec_ref: "behaviors.ADD-001"
-        status: pending
+        status: done
         depends_on: ["P2-09"]
         note: >
-          Add tests to src/commands/add.test.ts covering the two cleanup scenarios
+          Added tests to src/commands/add.test.ts covering the two cleanup scenarios
           from ADD-001 and ADD-003 derived_tests:
           1. Scaffold fails midway, cleanup succeeds: partial dir removed, original
              error reported, exit 1.

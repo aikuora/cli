@@ -124,18 +124,16 @@ are dispatched via `invokeIntegrationHandler` in `src/utils/integration.ts`.
 
 ## Active Context
 
-**Current task:** Ink removed (ADR-016). Phase 4 complete, Phase 5 pending.
+**Current task:** Phase 5 complete — all Polish and Hardening tasks done (P5-01 through P5-07)
 
 **Relevant files:**
 
-- `src/index.ts` — plain `async main()`, no Ink/React
-- `src/commands/{add,init,info,list}.ts` — renamed from `.tsx`, Ink components removed
-- `src/utils/workspace.ts` — `validateWorkspace()` — STARTUP-001 guard
-- `src/utils/project-scanner.ts` — `scanProjects()` walks structure dirs
-- `src/commands/info.ts` + `src/commands/list.ts` — INFO-001 and LIST-001 implemented
+- `src/utils/workspace.test.ts` — 3 STARTUP-001 derived_tests added using `os.tmpdir()` + `mkdtempSync`
+- `src/commands/init.test.ts` — created; INIT-001 nested workspace test
+- `src/commands/add.test.ts` — created; ADD-002 variant/re-link, ADD-005 local fork, TOOL-002 requires chain, ADD-001 scaffold cleanup tests (82 tests total pass)
 
 **Recent discoveries:**
 
-- `Config['structure']` fields (`apps`, `packages`, `modules`) are plain strings. `scanProjects` uses `join(workspaceRoot, dir)` to form absolute paths.
-- `readPrototools` returns `{}` when file is absent; check `Object.keys(rawPins).length > 0` before including `runtimePins` in JSON output.
-- `list tools` loads each tool's `aikuora.tool.yml` via `loadToolConfig` to get `lang`, `kind`, `description`; renders a padded ANSI-colored table.
+- `fs-extra` types (`@types/fs-extra`) do not expose `.default` on the module type. Mock by spreading `...original` and overriding `copy`/`remove` at top level, with the same mocks on a `default` key cast via `unknown`. Access in tests via `vi.mocked(fse.copy)` where `fse` is the default import.
+- Scaffold cleanup in `runScaffold` only triggers when `existsSync(targetDir)` is true after failure. Tests mock `renderAndCopy` to create `targetDir` then throw — triggering the cleanup branch.
+- `ensureRequiredTools` calls `runRoot` (not `runLink`) with `silent: true`. Re-link warnings only exist in `runLink` gated on `!silent`. Transitive requires never produce re-link warnings.

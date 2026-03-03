@@ -1,4 +1,5 @@
-import { mkdirSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -130,5 +131,75 @@ describe('validateWorkspace', () => {
         expect(result.config.name).toBe('acme-mono');
       }
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// STARTUP-001 derived_tests: isolated temp dirs using os.tmpdir()
+// ---------------------------------------------------------------------------
+
+describe('validateWorkspace — STARTUP-001 derived tests', () => {
+  let testDir: string;
+
+  afterEach(() => {
+    if (testDir) rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('STARTUP-001 invalid scope: returns valid=false with scope error when scope=INVALID', () => {
+    // given: aikuora.workspace.yml exists with scope=INVALID (not matching /^@[a-z0-9-]+$/)
+    testDir = mkdtempSync(join(tmpdir(), 'startup-001-invalid-scope-'));
+    writeFileSync(
+      join(testDir, 'aikuora.workspace.yml'),
+      'name: "acme-mono"\nscope: "INVALID"\n',
+      'utf-8'
+    );
+
+    // when: developer runs any aikuora command (validateWorkspace is called)
+    const result = validateWorkspace(testDir);
+
+    // then: command does not execute; error describes invalid scope field; exit code 1
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.error).toMatch(/scope/i);
+    }
+  });
+
+  it('STARTUP-001 happy path: returns valid=true when scope=@acme and name=acme-mono', () => {
+    // given: aikuora.workspace.yml exists with scope=@acme and name=acme-mono
+    testDir = mkdtempSync(join(tmpdir(), 'startup-001-happy-'));
+    writeFileSync(
+      join(testDir, 'aikuora.workspace.yml'),
+      'name: "acme-mono"\nscope: "@acme"\n',
+      'utf-8'
+    );
+
+    // when: developer runs any aikuora command (validateWorkspace is called)
+    const result = validateWorkspace(testDir);
+
+    // then: validation passes and command proceeds normally
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.config.name).toBe('acme-mono');
+      expect(result.config.scope).toBe('@acme');
+    }
+  });
+
+  it('STARTUP-001 missing name: returns valid=false with name error when name field is absent', () => {
+    // given: aikuora.workspace.yml exists with scope=@acme but name field is absent
+    testDir = mkdtempSync(join(tmpdir(), 'startup-001-missing-name-'));
+    writeFileSync(
+      join(testDir, 'aikuora.workspace.yml'),
+      'scope: "@acme"\n',
+      'utf-8'
+    );
+
+    // when: developer runs any aikuora command (validateWorkspace is called)
+    const result = validateWorkspace(testDir);
+
+    // then: command does not execute; error states name field is required; exit code 1
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.error).toMatch(/name/i);
+    }
   });
 });

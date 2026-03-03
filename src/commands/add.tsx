@@ -6,10 +6,10 @@ import { Text } from 'ink';
 import { loadToolConfig } from '../core/loader.js';
 import { resolveTool } from '../core/resolver.js';
 import { scanAllTools } from '../core/scanner.js';
-import { readConfig } from '../managers/config.js';
 import type { OutputOptions } from '../utils/output.js';
 import { output, outputError } from '../utils/output.js';
 import { readProjectFile } from '../utils/project-file.js';
+import { validateWorkspace } from '../utils/workspace.js';
 import { runRoot } from './add/root.js';
 import { runLocal } from './add/local.js';
 import { runShareable } from './add/shareable.js';
@@ -46,12 +46,18 @@ export async function addCommand(options: AddOptions) {
   const { local, name, target, toolName, json, cwd = process.cwd() } = options;
   const projectRoot = resolve(cwd);
 
+  // STARTUP-001: validate workspace config before executing any command logic.
+  const wsResult = validateWorkspace(projectRoot);
+  if (!wsResult.valid) {
+    if (json) output({ action: 'add', success: false, error: wsResult.error }, { json });
+    else outputError(wsResult.error, { json });
+    return { success: false };
+  }
+
   if (local) return runLocal(options);
   if (name) return runScaffold(options);
 
-  // Hoist a single readConfig() call shared by both branches below.
-  const configResult = readConfig();
-  const customPaths = configResult.data?.customTools ?? [];
+  const customPaths = wsResult.config.customTools;
   const tools = scanAllTools(projectRoot, customPaths);
 
   if (target) {

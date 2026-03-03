@@ -7,8 +7,8 @@ import fse from 'fs-extra';
 import { loadToolConfig } from '../../core/loader.js';
 import { resolveTool } from '../../core/resolver.js';
 import { scanAllTools } from '../../core/scanner.js';
-import { readConfig } from '../../managers/config.js';
 import type { Config } from '../../types/config.js';
+import { validateWorkspace } from '../../utils/workspace.js';
 import type { MoonTask } from '../../types/tool-config.js';
 import { invokeIntegrationHandler } from '../../utils/integration.js';
 import { injectCssImport, patchTsconfigPaths, patchTsconfigReferences, sortDeps } from '../../utils/integration-patches.js';
@@ -83,15 +83,14 @@ export async function runScaffold(options: AddOptions) {
   const { toolName, name: appName, json, cwd = process.cwd() } = options;
   const projectRoot = resolve(cwd);
 
-  const configResult = readConfig();
-  if (!configResult.success) {
-    const err = configResult.error?.message ?? 'Could not read project config';
-    if (json) output({ action: 'add', mode: 'scaffold', success: false, error: err }, { json });
-    else outputError(err, { json });
+  const wsResult = validateWorkspace(projectRoot);
+  if (!wsResult.valid) {
+    if (json) output({ action: 'add', mode: 'scaffold', success: false, error: wsResult.error }, { json });
+    else outputError(wsResult.error, { json });
     return { success: false };
   }
 
-  const rootConfig = configResult.data!;
+  const rootConfig = wsResult.config;
 
   const resolved = await loadResolvedTool(
     toolName,

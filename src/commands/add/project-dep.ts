@@ -1,11 +1,11 @@
 import { existsSync } from 'fs';
 import { resolve } from 'path';
 
-import { scanAllTools } from '../../core/scanner.js';
-import { readConfig } from '../../managers/config.js';
+import type { scanAllTools } from '../../core/scanner.js';
 import { invokeIntegrationHandler } from '../../utils/integration.js';
 import { output, outputError, outputSuccess } from '../../utils/output.js';
 import { appendProjectDependency, readProjectFile } from '../../utils/project-file.js';
+import { validateWorkspace } from '../../utils/workspace.js';
 import type { AddOptions } from '../add.js';
 
 // ---------------------------------------------------------------------------
@@ -27,15 +27,14 @@ export async function runProjectDependency(
     return { success: false };
   }
 
-  const configResult = readConfig();
-  if (!configResult.success) {
-    const err = configResult.error?.message ?? 'Could not read project config';
-    if (json) output({ action: 'add', mode: 'project', success: false, error: err }, { json });
-    else outputError(err, { json });
+  const wsResult = validateWorkspace(projectRoot);
+  if (!wsResult.valid) {
+    if (json) output({ action: 'add', mode: 'project', success: false, error: wsResult.error }, { json });
+    else outputError(wsResult.error, { json });
     return { success: false };
   }
 
-  const rootConfig = configResult.data!;
+  const rootConfig = wsResult.config;
   const scope = rootConfig.scope;
 
   const targetDir = resolve(projectRoot, target);

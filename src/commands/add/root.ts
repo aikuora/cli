@@ -1,11 +1,11 @@
 import { existsSync } from 'fs';
 import { join, resolve } from 'path';
 
-import { readConfig } from '../../managers/config.js';
 import { output, outputError, outputSuccess } from '../../utils/output.js';
 import { applyWorkspaceSettings } from '../../utils/workspace-integrations.js';
 import { pinProtoVersion } from '../../utils/prototools.js';
 import { renderAndCopy } from '../../utils/template.js';
+import { validateWorkspace } from '../../utils/workspace.js';
 import type { AddOptions } from '../add.js';
 import { loadResolvedTool } from './shared.js';
 
@@ -17,17 +17,16 @@ export async function runRoot(options: AddOptions): Promise<{ success: boolean }
   const { toolName, json, silent, cwd = process.cwd() } = options;
   const projectRoot = resolve(cwd);
 
-  const configResult = readConfig();
-  if (!configResult.success) {
-    const err = configResult.error?.message ?? 'Could not read project config';
+  const wsResult = validateWorkspace(projectRoot);
+  if (!wsResult.valid) {
     if (!silent) {
-      if (json) output({ action: 'add', mode: 'root', success: false, error: err }, { json });
-      else outputError(err, { json });
+      if (json) output({ action: 'add', mode: 'root', success: false, error: wsResult.error }, { json });
+      else outputError(wsResult.error, { json });
     }
     return { success: false };
   }
 
-  const rootConfig = configResult.data!;
+  const rootConfig = wsResult.config;
 
   const resolved = await loadResolvedTool(
     toolName,

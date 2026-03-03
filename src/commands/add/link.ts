@@ -4,12 +4,12 @@ import { join, resolve } from 'path';
 
 import Handlebars from 'handlebars';
 
-import { readConfig } from '../../managers/config.js';
 import { addMoonTask } from '../../utils/moon.js';
 import { output, outputError, outputSuccess } from '../../utils/output.js';
 import { sortDeps } from '../../utils/integration-patches.js';
 import { applyWorkspaceSettings } from '../../utils/workspace-integrations.js';
 import { appendToolDependency, readProjectFile } from '../../utils/project-file.js';
+import { validateWorkspace } from '../../utils/workspace.js';
 import type { AddOptions } from '../add.js';
 import { ensureConfigsEntry } from './configs-entry.js';
 import { ensureRequiredTools } from './root.js';
@@ -32,15 +32,14 @@ export async function runLink(options: AddOptions) {
   const { toolName, target, variant: variantFlag, json, silent, cwd = process.cwd() } = options;
   const projectRoot = resolve(cwd);
 
-  const configResult = readConfig();
-  if (!configResult.success) {
-    const err = configResult.error?.message ?? 'Could not read project config';
-    if (json) output({ action: 'add', mode: 'link', success: false, error: err }, { json });
-    else outputError(err, { json });
+  const wsResult = validateWorkspace(projectRoot);
+  if (!wsResult.valid) {
+    if (json) output({ action: 'add', mode: 'link', success: false, error: wsResult.error }, { json });
+    else outputError(wsResult.error, { json });
     return { success: false };
   }
 
-  const rootConfig = configResult.data!;
+  const rootConfig = wsResult.config;
 
   const resolved = await loadResolvedTool(
     toolName,

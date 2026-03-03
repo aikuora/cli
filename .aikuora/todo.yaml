@@ -446,12 +446,12 @@ phases:
 
   - id: 3
     name: "STARTUP-001 Workspace Validation Guard"
-    status: pending
+    status: completed
     tasks:
       - id: P3-01
         title: "Create validateWorkspace utility (STARTUP-001)"
         spec_ref: "behaviors.STARTUP-001"
-        status: pending
+        status: done
         note: >
           Create src/utils/workspace.ts with validateWorkspace(cwd?) function.
           It: (1) calls findConfigPath(cwd) from src/managers/config.ts,
@@ -468,7 +468,7 @@ phases:
       - id: P3-02
         title: "Wire validateWorkspace into all commands (STARTUP-001)"
         spec_ref: "behaviors.STARTUP-001"
-        status: pending
+        status: done
         depends_on: ["P3-01", "P2-01"]
         note: >
           Update src/commands/add.tsx and src/commands/init.tsx (init is exempt).

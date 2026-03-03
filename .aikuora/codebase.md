@@ -24,8 +24,8 @@ src/
   managers/       — workspace config CRUD (config.ts reads/writes aikuora.workspace.yml)
   types/          — Zod schemas + inferred TypeScript types (config.ts, tool-config.ts, project.ts, tool.ts)
   utils/          — shared utilities (output.ts, moon.ts, prototools.ts, template.ts,
-                    integration.ts, integration-fs.ts, project-file.ts)
-                    — workspace.ts (to create: STARTUP-001 guard + project scanner)
+                    integration.ts, integration-fs.ts, project-file.ts,
+                    workspace.ts — STARTUP-001 guard via validateWorkspace)
 
 tools/            — 11 built-in tools, each with an aikuora.tool.yml
   <name>/
@@ -64,17 +64,18 @@ if (!json) return <NameCommand ... />;
 return null;
 ```
 
-### Config read pattern
+### Workspace validation pattern (STARTUP-001)
+
+Every command handler except `init` must call `validateWorkspace` first:
 
 ```typescript
-const configResult = readConfig();
-if (!configResult.success) {
-  const err = configResult.error?.message ?? 'Could not read project config';
-  if (json) output({ action, success: false, error: err }, { json });
-  else outputError(err, { json });
+const wsResult = validateWorkspace(projectRoot);
+if (!wsResult.valid) {
+  if (json) output({ action, success: false, error: wsResult.error }, { json });
+  else outputError(wsResult.error, { json });
   return { success: false };
 }
-const rootConfig = configResult.data!;
+const rootConfig = wsResult.config;
 ```
 
 ### Tool resolution pattern
@@ -129,17 +130,21 @@ are dispatched via `invokeIntegrationHandler` in `src/utils/integration.ts`.
 
 ## Active Context
 
-**Current task:** P0-08 (Phase 0 complete — all Code Optimization tasks done)
+**Current task:** P3-02 complete (Phase 3 complete — STARTUP-001 Workspace Validation Guard done)
 
 **Relevant files:**
 
-- `/Users/ccosming/Github/aikuora/cli/src/commands/add.tsx` — refactored: `readJsonFile` helper, `loadResolvedTool` helper, imports consolidated, duplicate `readConfig` eliminated
-- `/Users/ccosming/Github/aikuora/cli/src/core/scanner.ts` — `scanCustomTools` fixed to use `basename(absolutePath)`
-- `/Users/ccosming/Github/aikuora/cli/src/utils/moon.ts` — `taskToEntry` helper extracted, three duplicate task-building blocks replaced
-- `/Users/ccosming/Github/aikuora/cli/src/utils/template.ts` — `getTemplatesPath` aligned with `getBuiltInToolsPath` two-level detection
-- `/Users/ccosming/Github/aikuora/cli/src/index.tsx` — `mode` type updated from `'install'` to `'root-or-shareable'`
+- `/Users/ccosming/Github/aikuora/cli/src/utils/workspace.ts` — NEW: `validateWorkspace(cwd?)` returning `{ valid: true, config } | { valid: false, error }`. Uses `findConfigPath` + `readConfig`; extracts field-level Zod error messages for `name` and `scope`.
+- `/Users/ccosming/Github/aikuora/cli/src/utils/workspace.test.ts` — NEW: 9 unit tests (missing config, invalid YAML, empty/missing name, invalid/missing scope, valid config, walk-up).
+- `/Users/ccosming/Github/aikuora/cli/src/commands/add.tsx` — `validateWorkspace` wired as the first step in `addCommand`; `readConfig` import removed.
+- `/Users/ccosming/Github/aikuora/cli/src/commands/add/root.ts` — `readConfig` replaced with `validateWorkspace`.
+- `/Users/ccosming/Github/aikuora/cli/src/commands/add/shareable.ts` — `readConfig` replaced with `validateWorkspace`.
+- `/Users/ccosming/Github/aikuora/cli/src/commands/add/link.ts` — `readConfig` replaced with `validateWorkspace`.
+- `/Users/ccosming/Github/aikuora/cli/src/commands/add/scaffold.ts` — `readConfig` replaced with `validateWorkspace`.
+- `/Users/ccosming/Github/aikuora/cli/src/commands/add/project-dep.ts` — `readConfig` replaced with `validateWorkspace`.
 
 **Recent discoveries:**
 
-- `resolveTool` returns `DiscoveredTool | null`; the success branch of `loadResolvedTool` must explicitly type `discovered` as `DiscoveredTool` (not `ReturnType<typeof resolveTool>`) to avoid null narrowing issues downstream.
-- `OutputOptions.json` is `boolean | undefined`; when passing to `output()`/`outputError()` inside a generic helper, use `json ?? false` to satisfy the strict `{ json: boolean }` parameter type.
+- `validateWorkspace` extracts Zod field errors via a typed cast on `result.error?.details` (output of `error.format()`), accessing `details.name._errors[0]` and `details.scope._errors[0]`.
+- `init` command is intentionally exempt from `validateWorkspace` — it creates the workspace config, so it cannot pre-validate one.
+- `runLocal` requires no `validateWorkspace` call of its own because `addCommand` calls it first; `runLocal` only uses built-in tools (no config needed).

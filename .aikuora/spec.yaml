@@ -1,15 +1,18 @@
 # Spec: aikuora CLI
-# Developer workspace automation CLI for moonrepo monorepos.
+# Developer workspace automation CLI for moonrepo monorepos and simple repos.
 
 domain: "aikuora CLI"
 description: >
   A command-line tool that automates the setup and maintenance of developer
-  workspaces inside moonrepo monorepos. It solves the problem of manually
-  wiring tools, editor settings, task configurations, and shared packages
-  into each project. The CLI discovers tools by priority, scaffolds new
-  projects from templates, links external tools to projects declaratively,
-  and keeps workspace-level integrations (editor settings, git ignore rules,
-  inherited tasks) idempotent and conflict-free.
+  workspaces inside moonrepo monorepos and simple (non-monorepo) repositories.
+  It solves the problem of manually wiring tools, editor settings, task
+  configurations, and shared packages into each project. The CLI discovers
+  tools by priority, scaffolds new projects from templates, links external
+  tools to projects declaratively, and keeps workspace-level integrations
+  (editor settings, git ignore rules, inherited tasks) idempotent and
+  conflict-free. In simple workspaces, shareable tools write their
+  configuration directly to the workspace root rather than creating shared
+  packages.
 
 # ---------------------------------------------------------------------------
 # Layer 1: World Model
@@ -19,7 +22,8 @@ actors:
   developer:
     description: "A human engineer running the aikuora CLI in their terminal"
     can:
-      - initialize a workspace with aikuora init
+      - initialize a monorepo workspace with aikuora init
+      - initialize a simple (non-monorepo) workspace with aikuora init simple
       - add a scaffold or create a shareable config package or create a root config via aikuora add
       - fork a built-in tool to the workspace tools/ directory via aikuora add <tool> --local
       - inspect workspace metadata with aikuora info
@@ -31,6 +35,7 @@ actors:
       - produce duplicate entries in workspace integration files (VSCode settings, .gitignore, Moon tasks)
       - directly invoke link mode (aikuora add <tool> <target>) in v1 — this is deferred to a future version
       - directly invoke project dependency wiring (aikuora add <pkg> <target>) in v1 — this is deferred to a future version
+      - run aikuora add with a shareable tool in a simple workspace if that tool does not declare link.simpleContent
 
   ai_agent:
     description: "An automated process or AI assistant invoking the CLI non-interactively"
@@ -55,17 +60,22 @@ actors:
       - validate aikuora.workspace.yml against the workspace_config schema before executing any command
       - automatically trigger ADD-002 (link mode) for each devtools entry when processing ADD-001 (scaffold)
       - automatically trigger ADD-006 (project dependency mode) for each packages entry when processing ADD-001 (scaffold)
+      - apply shareable tool configuration directly to the workspace root in simple workspaces (ADD-003-SIMPLE)
     cannot:
       - delete or destructively overwrite existing project files
       - silently drop a VSCode settings key conflict without warning
       - apply a workspace integration patch that would introduce a duplicate entry
+      - use ADD-003 (shared package creation) in a simple workspace — ADD-003-SIMPLE must be used instead
 
 entities:
   workspace:
     description: >
-      The root of an aikuora-managed monorepo, identified by the presence of
+      The root of an aikuora-managed workspace, identified by the presence of
       aikuora.workspace.yml. All CLI operations resolve the workspace by
-      walking up the directory tree from cwd.
+      walking up the directory tree from cwd. A workspace can be either a
+      monorepo (type=monorepo, default) or a simple single-project repo
+      (type=simple). In a simple workspace the workspace root itself is the
+      single project; there are no subdirectory projects.
     attributes:
       root_path:
         type: string
@@ -79,6 +89,12 @@ entities:
         type: string
         required: true
         constraints: "1 to 100 characters, human-readable workspace name"
+      type:
+        type: enum
+        required: false
+        values: ["monorepo", "simple"]
+        default: "monorepo"
+        constraints: "Workspace topology; if absent in aikuora.workspace.yml, defaults to monorepo for backward compatibility"
     states: ["active"]
     transitions:
       active:
@@ -94,11 +110,14 @@ entities:
       - "A workspace has exactly one scope that prefixes all project package names"
       - "A workspace cannot be initialized inside a directory whose ancestor already contains an aikuora.workspace.yml"
       - "Projects are discovered by scanning the directories declared in aikuora.workspace.yml's structure property and reading aikuora.project.yml files found there; there is no separate registration file"
+      - "In a monorepo workspace (type=monorepo or type absent), projects live in subdirectories declared in the structure property"
+      - "In a simple workspace (type=simple), the workspace root itself is the single project; aikuora.project.yml exists at the workspace root; there are no subdirectory projects"
 
   workspace_config:
     description: >
       The aikuora.workspace.yml file that declares the workspace scope, name,
-      and workspace-level integration settings (VSCode, gitignore, Moon inherited tasks).
+      type, and workspace-level integration settings (VSCode, gitignore, Moon
+      inherited tasks).
     attributes:
       scope:
         type: string
@@ -108,6 +127,12 @@ entities:
         type: string
         required: true
         constraints: "1 to 100 characters"
+      type:
+        type: enum
+        required: false
+        values: ["monorepo", "simple"]
+        default: "monorepo"
+        constraints: "If absent, treated as monorepo for backward compatibility. If present, must be exactly 'monorepo' or 'simple' — any other value is invalid and halts the command."
       integrations:
         type: map
         required: false
@@ -116,7 +141,10 @@ entities:
     rules:
       - "workspace_config must exist before any other aikuora command can run"
       - "scope in workspace_config is the single source of truth for the workspace scope"
-      - "Before executing any command, aikuora validates aikuora.workspace.yml against the workspace_config schema; if invalid (missing name, missing scope, or scope not matching /^@[a-z0-9-]+$/), a descriptive error is shown and the command exits with code 1"
+      - "Before executing any command, aikuora validates aikuora.workspace.yml against the workspace_config schema; if invalid (missing name, missing scope, scope not matching /^@[a-z0-9-]+$/, or type not one of monorepo|simple), a descriptive error is shown and the command exits with code 1"
+      - "If type is absent from aikuora.workspace.yml, it is treated as monorepo; no error is raised (backward compatibility)"
+      - "aikuora init simple always writes type: simple explicitly to aikuora.workspace.yml"
+      - "aikuora init (monorepo) always writes type: monorepo explicitly to aikuora.workspace.yml"
 
   tool:
     description: >
@@ -139,7 +167,8 @@ entities:
         required: true
         values: ["shareable", "root", "none"]
         constraints: >
-          shareable: tool creates/updates the shared config package (packages/configs/);
+          shareable: tool creates/updates the shared config package (packages/configs/) in monorepo mode,
+          or writes configuration directly to the workspace root in simple mode (ADD-003-SIMPLE);
           root: tool configures the workspace root (moon, node, pnpm);
           none: tool is linkable and/or scaffoldable only; no shared package or root changes
       requires:
@@ -150,6 +179,27 @@ entities:
         type: "map[string, link_variant]"
         required: false
         constraints: "Named map of link variants this tool supports; key is variant name, value is the link_variant definition"
+      link_simple_content:
+        type: string
+        required: false
+        constraints: "Full configuration content to write directly to the workspace root when workspace type=simple. Required for shareable tools to be usable in simple workspaces. Lives in the link block of aikuora.tool.yml as link.simpleContent."
+      link_simple_file:
+        type: string
+        required: false
+        constraints: "Output filename written to the workspace root when ADD-003-SIMPLE applies this tool (e.g., 'tsconfig.json'). Required whenever link.simpleContent is declared. Lives in the link block of aikuora.tool.yml as link.simpleFile."
+      link_simple_variant:
+        type: string
+        required: false
+        constraints: "Variant name to apply when writing in simple mode. Optional; only meaningful when the tool declares variants. Lives in the link block of aikuora.tool.yml as link.simpleVariant. Must reference a variant name that exists in the tool's variants map."
+      scaffold_devtools:
+        type: "list[string]"
+        required: false
+        constraints: "Ordered list of tool names to auto-wire to a project or workspace when this tool is used as a scaffold or --base tool. Lives under the scaffold key in aikuora.tool.yml as scaffold.devtools. Each entry must be a resolvable tool name."
+      lang:
+        type: enum
+        required: false
+        values: ["node", "python"]
+        constraints: "Language associated with this tool. Required for a tool to be used as a --base argument to INIT-002. Determines which manifest file is updated when this tool is the scaffold_tool for a project."
     has_many: "tool_config"
     rules:
       - "Tools are discovered from the built-in package, the tools/ directory, and paths listed in customTools; if a name collision occurs, customTools > tools/ > built-in"
@@ -157,6 +207,12 @@ entities:
       - "Tool names must be unique within the resolved registry; on collision the highest-priority source wins"
       - "A tool that does not exist in the resolved registry cannot be linked to a project"
       - "If a tool declares variants, the developer must supply a variant argument when linking; omitting the variant is an error"
+      - "A shareable tool (kind=shareable) must declare link.simpleContent to be usable in a simple workspace; if link.simpleContent is absent and the workspace type=simple, the operation fails with 'tool <name> does not support simple workspace mode'"
+      - "link.simpleContent holds the full configuration text written directly to the workspace root file in simple mode — it is not a re-export wrapper"
+      - "link.simpleFile is required whenever link.simpleContent is declared; a tool declaring link.simpleContent without link.simpleFile is an invalid tool configuration and TOOL-001 fails with: 'tool <name> is missing link.simpleFile'"
+      - "link.simpleVariant, if present, names which variant the tool uses when writing in simple mode; it must reference a variant name that exists in the tool's variants map — validated at TOOL-001 load time; a mismatch is an invalid tool configuration"
+      - "scaffold.devtools, if declared, is an ordered list of tool names applied automatically when this tool is used as a --base for INIT-002; each entry is applied via ADD-003-SIMPLE in order"
+      - "A tool is valid as a --base argument to INIT-002 if and only if it declares both scaffold.devtools (non-empty) and lang; if either is absent, INIT-002 fails with a descriptive error"
 
   tool_config:
     description: >
@@ -179,12 +235,13 @@ entities:
 
   project:
     description: >
-      A package within the monorepo workspace (app, package, module, or
-      shareable config package). Each project is identified by its path
-      relative to the workspace root and has an aikuora.project.yml
-      describing its linked tools and metadata. Root tool installations
-      operate at workspace level only and have no corresponding project entity
-      or aikuora.project.yml.
+      A package within the workspace (app, package, module, or shareable
+      config package). Each project is identified by its path relative to the
+      workspace root and has an aikuora.project.yml describing its linked
+      tools and metadata. Root tool installations operate at workspace level
+      only and have no corresponding project entity or aikuora.project.yml.
+      In a simple workspace, the single project is at the workspace root
+      itself (path='.').
     attributes:
       name:
         type: string
@@ -193,12 +250,13 @@ entities:
       path:
         type: string
         required: true
-        constraints: "Path relative to workspace root; must be unique within the workspace"
+        constraints: "Path relative to workspace root; must be unique within the workspace; '.' for the root project in a simple workspace"
       kind:
         type: enum
         required: true
-        values: ["app", "package", "module", "shareable"]
-    states: ["app", "package", "module", "shareable"]
+        values: ["app", "package", "module", "shareable", "simple"]
+        constraints: "'simple' is the kind used for the root project in a simple workspace"
+    states: ["app", "package", "module", "shareable", "simple"]
     transitions:
       app:
         - to: "package"
@@ -225,6 +283,10 @@ entities:
         - to: "package"
           when: "Project kind is changed by the developer in aikuora.project.yml"
           actor: "developer"
+      simple:
+        - to: "simple"
+          when: "No transitions defined — the root project in a simple workspace is always kind=simple"
+          actor: "developer"
     belongs_to: "workspace"
     has_one: "project_file"
     has_many: "tool_config"
@@ -237,18 +299,22 @@ entities:
       - "Root tool installations (kind=root) are not represented as projects; aikuora list and aikuora info do not show them as projects"
       - "Shareable config packages (kind=shareable) ARE listed by aikuora list packages"
       - "Transitions from shareable to app or shareable to module are not allowed; a shareable config package can only transition to kind=package"
+      - "In a simple workspace, exactly one project exists at path='.'; its kind is always 'simple'"
+      - "kind=simple is only valid in a simple workspace (type=simple); it is not allowed in monorepo workspaces"
+      - "In a simple workspace, the root project always has kind=simple; kind values app, package, module, and shareable are invalid in a simple workspace project file"
 
   project_file:
     description: >
       The aikuora.project.yml file at the root of a project directory. It
       declares the project kind, name, the list of tools linked to the project,
       the scaffold_tool reference used to derive the project language, and the
-      list of aikuora-tracked dependencies.
+      list of aikuora-tracked dependencies. In a simple workspace, this file
+      lives at the workspace root (not in a subdirectory).
     attributes:
       kind:
         type: enum
         required: true
-        values: ["app", "package", "module", "shareable"]
+        values: ["app", "package", "module", "shareable", "simple"]
       name:
         type: string
         required: true
@@ -271,12 +337,16 @@ entities:
       - "Adding a tool records it in aikuora.project.yml"
       - "Re-linking an already-linked tool emits a warning but re-applies the tool configuration"
       - "Root tool installs (kind=root tool) do NOT produce an aikuora.project.yml — no project file is created for root mode"
+      - "In a simple workspace, aikuora.project.yml is created at the workspace root during INIT-002 with kind=simple"
+      - "aikuora add in a simple workspace requires aikuora.project.yml to already exist at the workspace root; it is always present after INIT-002"
 
   shared_config_package:
     description: >
       A shareable configuration package (kind=shareable) that contains
       reusable tool configuration meant to be consumed by multiple projects.
       It is itself a project in the workspace and is listed by aikuora list packages.
+      Shared config packages only exist in monorepo workspaces; they are not
+      created in simple workspaces (ADD-003-SIMPLE writes config directly instead).
     attributes:
       name:
         type: string
@@ -292,6 +362,7 @@ entities:
       - "A shareable config package can be added as a dependency to other projects"
       - "A shareable config package has an aikuora.project.yml with kind=shareable in its directory (e.g., packages/configs/)"
       - "Shareable packages are included in the output of aikuora list packages"
+      - "Shared config packages are only created in monorepo workspaces (type=monorepo or type absent); in simple workspaces, ADD-003-SIMPLE is used instead"
 
   moon_task:
     description: >
@@ -318,6 +389,7 @@ entities:
       - "Inherited tasks are defined in .moon/tasks/<filename>.yml under the tasks: key and applied to all projects; no project-level duplicate may exist"
       - "Adding a task that already exists in a project's Moon config is idempotent (no duplicate is created)"
       - "The Moon workspace configuration is at .moon/workspace.yml"
+      - "In a simple workspace, .moon/workspace.yml is created with projects: [] (empty list); Moon is not used for project discovery"
 
   link_variant:
     description: >
@@ -338,6 +410,8 @@ entities:
       - "A link_variant must belong to exactly one tool"
       - "If a tool supports variants, the developer must specify one when linking; omitting the variant exits with code 1 and lists the available variants"
       - "If a tool has no variants, no variant selection is needed"
+      - "In simple workspace mode, if the tool declares link.simpleVariant, that variant is used automatically; the developer does not specify a variant separately"
+      - "link.simpleVariant must reference a variant name that exists in the tool's variants map; this is validated at TOOL-001 load time; a link.simpleVariant value that does not match any declared variant is an invalid tool configuration"
 
   dependent_integration:
     description: >
@@ -410,6 +484,8 @@ entities:
     description: >
       The .prototools file at the workspace root that pins runtime versions
       as TOML key=value pairs (e.g. node = "22.0.0", pnpm = "10.0.0").
+      In a Python simple workspace, this file also pins the python version,
+      which must match the version written to .python-version.
     attributes:
       location:
         type: string
@@ -421,6 +497,38 @@ entities:
         constraints: "TOML key=value pairs; each key is a runtime name, each value is a version string"
     rules:
       - "If .prototools is absent, INFO-001 silently omits the runtime version pins section — no error is raised"
+      - "In a Python simple workspace, the python version in .prototools must equal the version in .python-version — they are always consistent"
+      - "The python version in .prototools and .python-version is derived from the python built-in tool's declared default version"
+
+  simple_workspace_template:
+    description: >
+      The set of files generated by INIT-002 for a simple workspace, split
+      by language. Captures which files are created, the rules for their
+      content, and how the --base devtools wiring mechanism populates
+      additional tool configuration. When --base is provided, language-specific
+      manifest files (package.json, pyproject.toml, .python-version, tsconfig)
+      are NOT generated — --base only drives devtools wiring via scaffold.devtools.
+    attributes:
+      lang:
+        type: enum
+        required: true
+        values: ["typescript", "python"]
+        constraints: "Language selected via --lang flag or derived from --base tool's lang field"
+      base_tool:
+        type: string
+        required: false
+        constraints: "Name of the base tool provided via --base; must exist in the built-in registry and declare both a lang field and scaffold.devtools; optional — if absent, no devtools are auto-wired"
+    rules:
+      - "When --base is NOT provided and lang=typescript: package.json is created at the workspace root with name='<scope>/<name>', version='0.0.0', private=true, scripts={}; tsconfig is wired via the tsconfig tool's link.simpleContent (ADD-003-SIMPLE)"
+      - "When --base is NOT provided and lang=python: pyproject.toml is created with [project] section (name from --name, version='0.0.0', requires-python derived from python tool's default version as '>=<version>'), [tool.uv] section; .python-version is created with the python tool's default version string"
+      - "Both .python-version and .prototools python entry must contain the same version string, derived from the python built-in tool's default version"
+      - "A python built-in tool must exist in the registry with a declared default version field; INIT-002 --lang python reads this version; if the python tool is not found in the registry, INIT-002 --lang python fails with an error"
+      - "When --base <toolname> is provided: the base tool's scaffold.devtools list is read; each tool in that list is applied to the workspace root in direct-write simple mode (ADD-003-SIMPLE); all applied tools are recorded in aikuora.project.yml at the root"
+      - "When --base is provided: language-specific manifest files (package.json, pyproject.toml, .python-version, and tsconfig) are NOT generated; --base only drives devtools wiring; src/ and tests/ directories ARE still created"
+      - "When --lang is provided alongside --base: the lang must match the base tool's declared lang field exactly; a mismatch exits with code 1 and no files are written"
+      - "When --base is provided and --lang is omitted: lang is derived from the base tool's lang field; if the base tool declares no lang field, INIT-002 fails with an error"
+      - "When --base is omitted: --lang is required; if absent, INIT-002 exits with code 1 and no files are written"
+      - "--base is specific to aikuora init simple in v1; it is not available for aikuora init (monorepo)"
 
 # ---------------------------------------------------------------------------
 # CLI Argument Syntax Disambiguation
@@ -437,8 +545,12 @@ entities:
 #        -> Project dependency mode (ADD-006): INTERNAL — auto-invoked by
 #           ADD-001 when processing scaffold packages entries. Direct developer
 #           invocation is deferred to a future version.
-#   4. add <tool>  (no target, tool.kind = shareable)
+#   4. add <tool>  (no target, tool.kind = shareable, workspace type=monorepo)
 #        -> Shareable mode (ADD-003): no target, resolved tool has kind=shareable
+#   4b. add <tool>  (no target, tool.kind = shareable, workspace type=simple)
+#        -> Simple direct-write mode (ADD-003-SIMPLE): writes link.simpleContent
+#           to the file named by link.simpleFile at the workspace root;
+#           no shared package created
 #   5. add <tool>  (no target, tool.kind = root)
 #        -> Root mode (ADD-004): no target, resolved tool has kind=root
 #   6. add <tool> --local
@@ -448,6 +560,7 @@ entities:
 # Note: Modes 4 and 5 share the same CLI syntax; disambiguation is by tool.kind.
 #       Shareable mode is triggered when tool.kind=shareable.
 #       Root mode is triggered when tool.kind=root.
+#       ADD-003 vs ADD-003-SIMPLE is determined by workspace type at runtime.
 #
 # Note on kind=none with no flags (G-M-002):
 #       If a tool exists with kind=none and no target, --name, or --local flag
@@ -482,38 +595,93 @@ behaviors:
     description: >
       Validate aikuora.workspace.yml against the workspace_config schema
       before executing any command. This is an implicit pre-step that runs
-      universally before any CLI command proceeds.
+      universally before any CLI command proceeds. Validation now includes
+      the type field: if present it must be exactly 'monorepo' or 'simple';
+      if absent it defaults to 'monorepo' without error.
     trigger: "Any aikuora CLI command is invoked"
     pre_conditions:
       - "A workspace is found by walking up from cwd"
     result:
-      - "If aikuora.workspace.yml is valid (name present, scope present and matching /^@[a-z0-9-]+$/), the command proceeds normally"
+      - "If aikuora.workspace.yml is valid (name present, scope present and matching /^@[a-z0-9-]+$/, type either absent or one of monorepo|simple), the command proceeds normally"
       - "If aikuora.workspace.yml is invalid, execution is halted"
     side_effects: []
     on_failure:
       - "A descriptive error naming the specific invalid field is shown to the developer"
+      - "If type is present but not 'monorepo' or 'simple', the error states: 'Invalid workspace type \"<value>\": must be monorepo or simple'"
       - "Exit code 1 is returned"
       - "The requested command does not execute"
 
   INIT-001:
     actor: "developer"
     description: >
-      Initialize a new aikuora workspace in the current directory by creating
-      aikuora.workspace.yml with the declared scope and name.
+      Initialize a new aikuora monorepo workspace in the current directory
+      by creating aikuora.workspace.yml with the declared scope, name, and
+      type: monorepo explicitly set.
     pre_conditions:
       - "The current directory does not already contain an aikuora.workspace.yml"
       - "No ancestor directory (walking up from cwd) contains an aikuora.workspace.yml"
       - "The scope argument is provided and matches /^@[a-z0-9-]+$/"
       - "The name argument is provided and is between 1 and 100 characters"
     result:
-      - "aikuora.workspace.yml is created at the current directory with scope and name populated"
-      - "The current directory is now a recognized aikuora workspace"
+      - "aikuora.workspace.yml is created at the current directory with scope, name, and type: monorepo populated"
+      - "The current directory is now a recognized aikuora monorepo workspace"
     side_effects:
       - "Default workspace-level integration stubs may be written (e.g., initial .gitignore entries)"
     on_failure:
       - "No files are written"
       - "If an ancestor directory contains an aikuora.workspace.yml, the developer is informed: 'Cannot initialize workspace inside an existing aikuora workspace at <path>'"
       - "Developer is informed of the specific pre-condition that was not met (invalid scope format, missing name, or workspace already exists in current directory)"
+
+  INIT-002:
+    actor: "developer"
+    description: >
+      Initialize a new aikuora simple (non-monorepo) workspace in the current
+      directory. Creates aikuora.workspace.yml with type: simple, base workspace
+      files, src/ and tests/ directories, and aikuora.project.yml at the root
+      with kind=simple. When --base is NOT provided, also creates language-specific
+      manifest files (package.json for TypeScript, pyproject.toml and
+      .python-version for Python). When --base IS provided, language-specific
+      manifest files are skipped; the base tool's scaffold.devtools list is
+      applied via ADD-003-SIMPLE instead.
+      Command: aikuora init simple --name <name> --scope <scope>
+                [--lang <typescript|python>] [--base <toolname>]
+    pre_conditions:
+      - "The current directory does not already contain an aikuora.workspace.yml"
+      - "No ancestor directory (walking up from cwd) contains an aikuora.workspace.yml"
+      - "The --name argument is provided and is between 1 and 100 characters"
+      - "The --scope argument is provided and matches /^@[a-z0-9-]+$/"
+      - "If --base is provided: the named tool exists in the built-in registry, its aikuora.tool.yml declares a lang field, and it declares scaffold.devtools (non-empty)"
+      - "If --base is provided and --lang is also provided: --lang must match the base tool's declared lang exactly"
+      - "If --base is NOT provided: --lang must be provided and must be exactly 'typescript' or 'python'"
+    result:
+      - "aikuora.workspace.yml is written first (before any ADD-003-SIMPLE calls), with scope, name, and type: simple"
+      - ".gitignore is created at the workspace root"
+      - ".vscode/settings.json is created at the workspace root"
+      - ".vscode/extensions.json is created at the workspace root"
+      - ".claude/settings.json is created at the workspace root"
+      - ".prototools is created at the workspace root"
+      - ".moon/workspace.yml is created with projects: [] (empty list)"
+      - "src/ directory is created at the workspace root"
+      - "tests/ directory is created at the workspace root"
+      - "aikuora.project.yml is created at the workspace root with kind=simple and name from --name"
+      - "When --base is NOT provided and lang=typescript: package.json is created at the workspace root with name='<scope>/<name>', version='0.0.0', private=true, scripts={}; the tsconfig tool is applied via ADD-003-SIMPLE (writes tsconfig tool's link.simpleContent to the file named by tsconfig's link.simpleFile at the workspace root)"
+      - "When --base is NOT provided and lang=python: pyproject.toml is created with [project] block (name=<name>, version='0.0.0', requires-python='>=<python-tool-version>') and [tool.uv] block; .python-version is created with the python built-in tool's default version string; the python version in .prototools matches .python-version"
+      - "When --base is provided: language-specific manifest files (package.json, pyproject.toml, .python-version, tsconfig) are NOT generated; the base tool's scaffold.devtools list is read and each listed tool is applied to the workspace root via ADD-003-SIMPLE in order; all successfully applied tools are recorded in aikuora.project.yml"
+    side_effects:
+      - "The workspace root becomes discoverable as a simple workspace by STARTUP-001 after init completes"
+      - "If --base devtools wiring fails for any tool, the failure is reported but other devtools are still applied (non-atomic wiring)"
+    on_failure:
+      - "No files are written if any pre-condition fails before file creation begins"
+      - "If an ancestor directory contains an aikuora.workspace.yml, the developer is informed: 'Cannot initialize workspace inside an existing aikuora workspace at <path>'"
+      - "If --lang is absent and --base is absent, the developer is informed: '--lang is required when --base is not provided'"
+      - "If --lang value is not 'typescript' or 'python', the developer is informed: 'Invalid --lang value \"<value>\": must be typescript or python'"
+      - "If --base tool is not found in the built-in registry, the developer is informed: 'Base tool \"<name>\" not found in built-in registry'"
+      - "If the --base tool exists but declares no lang field, the developer is informed: 'Base tool \"<name>\" does not declare a lang field'"
+      - "If the --base tool exists but declares no scaffold.devtools, the developer is informed: 'Base tool \"<name>\" declares no devtools list'"
+      - "If --lang is provided alongside --base and they conflict, the developer is informed: '--lang <value> does not match base tool lang <tool-lang>'"
+      - "If lang=python and the python built-in tool is not found in the registry, the developer is informed: 'python built-in tool not found in registry; cannot determine python version'"
+      - "If a shareable tool in the --base devtools list does not declare link.simpleContent, that tool's application fails with: 'tool <name> does not support simple workspace mode'; other tools in the devtools list continue"
+      - "When base workspace files are created successfully but one or more --base devtools applications fail, the workspace remains valid (aikuora.workspace.yml and aikuora.project.yml are intact); the developer must re-run 'aikuora add <toolname>' for each failed tool to complete the setup"
 
   ADD-001:
     actor: "developer"
@@ -573,12 +741,15 @@ behaviors:
   ADD-003:
     actor: "developer"
     description: >
-      Shareable mode: create a new shared_config_package in the workspace
-      using aikuora add <tool> where tool.kind=shareable (no target argument).
-      The package is created in packages/configs/ with an aikuora.project.yml
-      with kind=shareable.
+      Shareable mode (monorepo only): create a new shared_config_package in
+      the workspace using aikuora add <tool> where tool.kind=shareable (no
+      target argument). The package is created in packages/configs/ with an
+      aikuora.project.yml with kind=shareable. This mode is ONLY for monorepo
+      workspaces (type=monorepo or type absent). In simple workspaces,
+      ADD-003-SIMPLE is triggered instead.
     pre_conditions:
       - "A workspace is found by walking up from cwd"
+      - "The workspace type is monorepo (type=monorepo or type field absent)"
       - "The package name is provided and is unique within the workspace"
       - "The target path for the new package does not already exist"
     result:
@@ -591,6 +762,40 @@ behaviors:
       - "If the operation fails midway (partial directory created) and cleanup of the partial directory succeeds, the partial directory is removed; the original error is reported; exit code 1 is returned"
       - "If the operation fails midway AND cleanup of the partial directory also fails, BOTH the original failure and the cleanup failure are reported; the partial directory is left in place; the developer is told to manually delete the directory before retrying; exit code 1 is returned"
       - "Developer is informed if the name conflicts with an existing project or the path already exists"
+      - "If the workspace type is simple, ADD-003 does not execute; ADD-003-SIMPLE is dispatched instead"
+
+  ADD-003-SIMPLE:
+    actor: "developer"
+    description: >
+      Simple direct-write mode: apply a shareable tool's configuration directly
+      to the workspace root when the workspace type is simple. Triggered by
+      INIT-002 (during --base devtools wiring and language-specific tool setup
+      such as tsconfig) and by developer-invoked aikuora add <tool> in a simple
+      workspace where tool.kind=shareable. Unlike ADD-003, no shared_config_package
+      is created; the tool's link.simpleContent is written to the file named by
+      link.simpleFile at the workspace root.
+    trigger: >
+      INIT-002 wires a devtools tool or language-specific tool to the root
+      project; OR developer runs aikuora add <tool> in a simple workspace
+      where tool.kind=shareable
+    pre_conditions:
+      - "The workspace type is simple (type=simple); when called from INIT-002 the type is passed as in-process context since aikuora.workspace.yml has already been written before any ADD-003-SIMPLE call"
+      - "The named tool exists in the resolved tool registry"
+      - "The tool declares kind=shareable"
+      - "The tool declares link.simpleContent (non-empty string)"
+      - "The tool declares link.simpleFile (non-empty string)"
+    result:
+      - "The content from link.simpleContent is written to the workspace root at the filename specified by link.simpleFile"
+      - "The tool is recorded in aikuora.project.yml at the workspace root"
+      - "If the tool declares link.simpleVariant, that variant name is recorded alongside the tool entry in aikuora.project.yml"
+      - "Workspace-level integration patches declared by the tool (VSCode settings, .gitignore, Claude hooks, Moon tasks) are applied idempotently"
+    side_effects:
+      - "A warning is emitted if the tool was already recorded in aikuora.project.yml (re-link warning, same as ADD-002 behavior)"
+    on_failure:
+      - "If the tool does not declare link.simpleContent, the operation fails with: 'tool <name> does not support simple workspace mode'; no files are written"
+      - "If the tool is not found in the registry, no files are written and the developer is informed"
+      - "If the workspace type is not simple, ADD-003-SIMPLE does not execute; ADD-003 is dispatched instead"
+      - "If writing the config file fails, the developer is informed of the write error; aikuora.project.yml is not updated"
 
   ADD-004:
     actor: "developer"
@@ -673,7 +878,9 @@ behaviors:
       Tools are discovered from the built-in package, the tools/ directory,
       and paths listed in customTools in aikuora.workspace.yml. All tools
       are treated uniformly by their aikuora.tool.yml definition regardless
-      of source.
+      of source. At load time TOOL-001 also validates link.simpleFile is
+      present whenever link.simpleContent is declared, and that
+      link.simpleVariant (if present) references a declared variant name.
     trigger: "Any command that references a tool name (add, list)"
     pre_conditions:
       - "A workspace is found by walking up from cwd"
@@ -681,6 +888,8 @@ behaviors:
     result:
       - "Exactly one tool definition is selected as the effective tool for the given name"
       - "If a name collision occurs, customTools > tools/ > built-in; the highest-priority source wins"
+      - "link.simpleFile is validated to be present whenever the resolved tool declares link.simpleContent; if missing, resolution fails with: 'tool <name> is missing link.simpleFile'"
+      - "link.simpleVariant is validated to reference a variant name in the tool's variants map if the tool declares both; if mismatched, resolution fails with: 'tool <name> link.simpleVariant \"<value>\" does not match any declared variant'"
     side_effects: []
     on_failure:
       - "Tool resolution returns not-found"
@@ -847,16 +1056,18 @@ behaviors:
   INFO-001:
     actor: "developer"
     description: >
-      Display workspace metadata: workspace name, scope, list of all projects
-      with their kinds, tools linked per project, and runtime version pins
-      from .prototools (if the file exists). Root tool installations are not
-      shown as projects.
+      Display workspace metadata: workspace name, scope, type, and runtime
+      version pins from .prototools (if the file exists). In a monorepo
+      workspace, also lists all projects with their kinds and tools linked
+      per project. In a simple workspace, shows the root project's linked
+      tools instead of a project table. Root tool installations are not
+      shown as projects in either workspace type.
     pre_conditions:
       - "A workspace is found by walking up from cwd"
     result:
-      - "Workspace name and scope are displayed"
-      - "All projects in the workspace (app, package, module, shareable) are listed with their kind"
-      - "For each project, the list of linked tools is displayed"
+      - "Workspace name, scope, and type are displayed"
+      - "In a monorepo workspace (type=monorepo or type absent): all projects in the workspace (app, package, module, shareable) are listed with their kind and linked tools; root tool installations are excluded"
+      - "In a simple workspace (type=simple): no project table is shown; instead, the tools linked to the root project (from aikuora.project.yml at the workspace root) are displayed"
       - "If .prototools exists at the workspace root, runtime version pins are displayed; if .prototools is absent, this section is silently omitted"
     side_effects: []
     on_failure:
@@ -871,13 +1082,15 @@ behaviors:
       Projects are discovered by directory scan (not a registry file).
       'aikuora list packages' includes shareable config packages.
       Root tool installations are not listed as projects.
+      In a simple workspace, apps/packages/modules return an empty list (not
+      an error); tools returns the tool registry as normal.
     pre_conditions:
       - "A workspace is found by walking up from cwd"
       - "The type argument is one of: tools, apps, packages, modules"
     result:
       - "All discovered items of the requested type are output to stdout"
-      - "For 'packages', all packages including shareable config packages (kind=shareable) are included"
-      - "Root tool installations are excluded from all list output"
+      - "In a monorepo workspace: for 'packages', all packages including shareable config packages (kind=shareable) are included; root tool installations are excluded from all list output"
+      - "In a simple workspace: 'apps', 'packages', and 'modules' always return an empty list (the root project has kind=simple, not app/package/module); 'tools' returns the full tool registry"
       - "If --json flag is provided, output is a structured JSON array"
       - "If --json flag is not provided, output is human-readable"
     side_effects: []
@@ -903,19 +1116,29 @@ invariants:
     - "Root tool installations (kind=root) never produce an aikuora.project.yml"
     - "project.name always matches /^[a-z][a-z0-9-]*$/"
     - "tool.name always matches /^[a-z][a-z0-9-]*$/"
+    - "A simple workspace always has exactly one aikuora.project.yml at the workspace root with kind=simple"
+    - "In a simple workspace, .python-version and the python entry in .prototools always contain the same version string"
+    - "A shareable tool applied in a simple workspace always has link.simpleContent and link.simpleFile declared; a shareable tool missing either is never applied in a simple workspace"
 
   states:
     - "A tool kind is always one of: shareable, root, none"
-    - "A project kind is always one of: app, package, module, shareable"
+    - "A project kind is always one of: app, package, module, shareable, simple"
+    - "kind=simple is only valid in a simple workspace (type=simple); it never appears in a monorepo workspace"
+    - "In a simple workspace, the root project always has kind=simple; kind values app, package, module, and shareable are never valid in the root project file of a simple workspace"
+    - "workspace type, when present, is always exactly 'monorepo' or 'simple'"
+    - "When workspace type is absent from aikuora.workspace.yml, the effective type is monorepo"
     - "When a name collision exists across tool sources, customTools always wins over tools/ which always wins over built-in"
     - "A scaffold target path never exists before a scaffold operation begins"
-    - "Shareable config packages (kind=shareable) are always included in aikuora list packages output"
+    - "Shareable config packages (kind=shareable) are always included in aikuora list packages output in monorepo workspaces"
     - "A shareable project can only transition to kind=package; transitions to app or module are not allowed"
+    - "In a simple workspace, aikuora list apps, list packages, and list modules always return empty; aikuora list tools always returns the tool registry"
 
   temporal:
     - "The requires chain for a tool is always fully installed before the tool itself is applied"
     - "Tools in the requires chain are installed in depth-first order"
     - "STARTUP-001 (workspace config validation) always runs before any command proceeds"
+    - "In INIT-002, aikuora.workspace.yml is always written before any ADD-003-SIMPLE call is made; ADD-003-SIMPLE receives the workspace type as in-process context from INIT-002 and does not re-read aikuora.workspace.yml from disk"
+    - "In INIT-002 with --base, base tool devtools are applied after all base workspace files are created"
 
   transactional:
     - "If any tool in the requires chain cannot be resolved, no changes are made to any file"
@@ -926,6 +1149,9 @@ invariants:
     - "All workspace integration patches (VSCode settings, .gitignore, Moon tasks, Claude hooks) are idempotent: if idempotent_if string is present, the ENTIRE integration block is skipped"
     - "In --json mode, every output is structured JSON and every failure exits with code 1"
     - "When scaffold cleanup after partial failure also fails, both errors are reported and the partial directory is left in place"
+    - "INIT-002 writes no files if any pre-condition fails before file creation begins"
+    - "In INIT-002 --base devtools wiring, a single tool's failure does not abort the remaining devtools — each is applied independently and failures are reported per tool"
+    - "When INIT-002 base workspace files are written successfully but one or more --base devtools applications fail, the workspace remains valid and each failed tool must be re-applied manually with 'aikuora add <toolname>'"
 
 derived_tests:
   # STARTUP-001 failure: invalid scope
@@ -950,12 +1176,27 @@ derived_tests:
       - "An error stating that the name field is required is shown"
       - "Exit code 1 is returned"
 
+  # STARTUP-001 failure: invalid type value
+  - given: "aikuora.workspace.yml exists with scope=@acme, name=acme, and type=workspace (not a valid value)"
+    when: "Developer runs any aikuora command"
+    then:
+      - "The command does not execute"
+      - "An error states: 'Invalid workspace type \"workspace\": must be monorepo or simple'"
+      - "Exit code 1 is returned"
+
+  # STARTUP-001 edge case: type absent defaults to monorepo
+  - given: "aikuora.workspace.yml exists with scope=@acme and name=acme-mono but no type field"
+    when: "Developer runs any aikuora command"
+    then:
+      - "Validation passes; the workspace is treated as type=monorepo"
+      - "The command proceeds normally"
+
   # INIT-001 happy path
   - given: "An empty directory with no aikuora.workspace.yml anywhere in the path"
     when: "Developer runs aikuora init with scope=@acme and name=acme-mono"
     then:
       - "aikuora.workspace.yml is created in the current directory"
-      - "aikuora.workspace.yml contains scope: '@acme' and name: 'acme-mono'"
+      - "aikuora.workspace.yml contains scope: '@acme', name: 'acme-mono', and type: monorepo"
 
   # INIT-001 failure: already initialized
   - given: "A directory that already contains aikuora.workspace.yml"
@@ -977,6 +1218,125 @@ derived_tests:
     then:
       - "No files are written"
       - "Developer is informed: 'Cannot initialize workspace inside an existing aikuora workspace at <path>'"
+
+  # INIT-002 happy path: TypeScript, no --base
+  - given: "An empty directory with no aikuora.workspace.yml anywhere in the path; tsconfig built-in tool declares link.simpleContent and link.simpleFile='tsconfig.json'"
+    when: "Developer runs aikuora init simple --name my-app --scope @acme --lang typescript"
+    then:
+      - "aikuora.workspace.yml is created with type: simple, name: my-app, scope: @acme"
+      - "aikuora.project.yml is created at the workspace root with kind=simple and name=my-app"
+      - "package.json is created with name='@acme/my-app', version='0.0.0', private=true, scripts={}"
+      - "tsconfig tool's link.simpleContent is written to the workspace root as tsconfig.json (the filename from link.simpleFile)"
+      - "tsconfig is recorded in aikuora.project.yml"
+      - "src/ and tests/ directories are created"
+      - ".moon/workspace.yml is created with projects: []"
+
+  # INIT-002 happy path: Python, no --base
+  - given: "An empty directory with no aikuora.workspace.yml anywhere in the path; python built-in tool declares default version '3.12'"
+    when: "Developer runs aikuora init simple --name my-service --scope @acme --lang python"
+    then:
+      - "aikuora.workspace.yml is created with type: simple, name: my-service, scope: @acme"
+      - "aikuora.project.yml is created at the workspace root with kind=simple and name=my-service"
+      - "pyproject.toml is created with [project] block (name='my-service', version='0.0.0', requires-python='>=3.12') and [tool.uv] block"
+      - ".python-version is created containing '3.12'"
+      - ".prototools contains a python entry with value '3.12'"
+      - "src/ and tests/ directories are created"
+
+  # INIT-002 happy path: TypeScript with --base (no language-specific files)
+  - given: "An empty directory with no aikuora.workspace.yml; built-in tool 'nextjs' declares lang=typescript and scaffold.devtools=['prettier','eslint','tsconfig']"
+    when: "Developer runs aikuora init simple --name my-app --scope @acme --base nextjs"
+    then:
+      - "aikuora.workspace.yml is created with type: simple"
+      - "lang is derived from nextjs tool as typescript"
+      - "src/ and tests/ directories are created"
+      - "aikuora.project.yml is created at the workspace root with kind=simple"
+      - "package.json is NOT created (--base skips language-specific manifest files)"
+      - "prettier, eslint, and tsconfig tools are applied via ADD-003-SIMPLE in order"
+      - "All three tools are recorded in aikuora.project.yml"
+      - "No nextjs scaffold template is executed"
+
+  # INIT-002 happy path: --lang provided with --base, matching
+  - given: "An empty directory; built-in tool 'nextjs' declares lang=typescript and scaffold.devtools=['prettier']"
+    when: "Developer runs aikuora init simple --name my-app --scope @acme --lang typescript --base nextjs"
+    then:
+      - "Initialization proceeds normally (lang matches base tool lang)"
+      - "aikuora.workspace.yml is created with type: simple"
+      - "package.json is NOT created (--base skips language-specific manifest files)"
+      - "prettier is applied via ADD-003-SIMPLE"
+
+  # INIT-002 failure: --lang absent and --base absent
+  - given: "An empty directory with no aikuora.workspace.yml"
+    when: "Developer runs aikuora init simple --name my-app --scope @acme (no --lang, no --base)"
+    then:
+      - "No files are written"
+      - "Developer is informed: '--lang is required when --base is not provided'"
+      - "Exit code 1 is returned"
+
+  # INIT-002 failure: invalid --lang value
+  - given: "An empty directory with no aikuora.workspace.yml"
+    when: "Developer runs aikuora init simple --name my-app --scope @acme --lang ruby"
+    then:
+      - "No files are written"
+      - "Developer is informed: 'Invalid --lang value \"ruby\": must be typescript or python'"
+      - "Exit code 1 is returned"
+
+  # INIT-002 failure: --base tool not found
+  - given: "An empty directory with no aikuora.workspace.yml; no tool named 'nonexistent' exists in the built-in registry"
+    when: "Developer runs aikuora init simple --name my-app --scope @acme --base nonexistent"
+    then:
+      - "No files are written"
+      - "Developer is informed: 'Base tool \"nonexistent\" not found in built-in registry'"
+      - "Exit code 1 is returned"
+
+  # INIT-002 failure: --base tool has no scaffold.devtools
+  - given: "An empty directory with no aikuora.workspace.yml; built-in tool 'bare-tool' exists and declares lang=typescript but no scaffold.devtools"
+    when: "Developer runs aikuora init simple --name my-app --scope @acme --base bare-tool"
+    then:
+      - "No files are written"
+      - "Developer is informed: 'Base tool \"bare-tool\" declares no devtools list'"
+      - "Exit code 1 is returned"
+
+  # INIT-002 failure: --lang and --base lang mismatch
+  - given: "An empty directory with no aikuora.workspace.yml; built-in tool 'nextjs' declares lang=typescript and scaffold.devtools=['prettier']"
+    when: "Developer runs aikuora init simple --name my-app --scope @acme --lang python --base nextjs"
+    then:
+      - "No files are written"
+      - "Developer is informed: '--lang python does not match base tool lang typescript'"
+      - "Exit code 1 is returned"
+
+  # INIT-002 failure: nested workspace
+  - given: "The current directory is inside a directory that contains an aikuora.workspace.yml"
+    when: "Developer runs aikuora init simple --name my-app --scope @acme --lang typescript"
+    then:
+      - "No files are written"
+      - "Developer is informed: 'Cannot initialize workspace inside an existing aikuora workspace at <path>'"
+      - "Exit code 1 is returned"
+
+  # INIT-002 failure: python built-in tool not in registry
+  - given: "An empty directory with no aikuora.workspace.yml; the python built-in tool does not exist in the registry"
+    when: "Developer runs aikuora init simple --name my-service --scope @acme --lang python"
+    then:
+      - "No files are written"
+      - "Developer is informed: 'python built-in tool not found in registry; cannot determine python version'"
+      - "Exit code 1 is returned"
+
+  # INIT-002 edge case: --base devtools tool missing link.simpleContent
+  - given: "An empty directory; built-in tool 'nextjs' declares scaffold.devtools=['prettier','legacy-tool'] and lang=typescript; 'legacy-tool' exists but has no link.simpleContent"
+    when: "Developer runs aikuora init simple --name my-app --scope @acme --base nextjs"
+    then:
+      - "Base workspace files are created (aikuora.workspace.yml, aikuora.project.yml, src/, tests/, etc.)"
+      - "prettier is applied successfully via ADD-003-SIMPLE"
+      - "legacy-tool application fails with: 'tool legacy-tool does not support simple workspace mode'"
+      - "prettier is still recorded in aikuora.project.yml; legacy-tool is not recorded"
+      - "The workspace is left in a valid state; developer must run 'aikuora add legacy-tool' after resolving the tool issue"
+      - "Exit code is non-zero"
+
+  # INIT-002 edge case: link.simpleFile missing on a shareable tool (TOOL-001 validation)
+  - given: "An empty directory; built-in tool 'bad-tool' declares kind=shareable and link.simpleContent but no link.simpleFile"
+    when: "System calls TOOL-001 to resolve 'bad-tool'"
+    then:
+      - "Resolution fails with: 'tool bad-tool is missing link.simpleFile'"
+      - "No files are written"
 
   # ADD-001 happy path
   - given: "A workspace exists and a scaffold template named 'react-app' exists in the registry"
@@ -1050,28 +1410,66 @@ derived_tests:
       - "Developer is informed a variant is required and the available variants are listed"
       - "Exit code 1 is returned"
 
-  # ADD-003 happy path
-  - given: "A workspace exists with scope @acme"
+  # ADD-003 happy path (monorepo)
+  - given: "A monorepo workspace exists with scope @acme"
     when: "Developer runs aikuora add with kind=shareable and name=eslint-config"
     then:
       - "A new directory for the shareable package is created under packages/configs/"
       - "aikuora.project.yml with kind=shareable is present in the new directory"
 
+  # ADD-003 failure: workspace is simple — dispatches ADD-003-SIMPLE instead
+  - given: "A simple workspace exists"
+    when: "Developer runs aikuora add tsconfig (kind=shareable)"
+    then:
+      - "ADD-003 does not execute"
+      - "ADD-003-SIMPLE is dispatched instead"
+
   # ADD-003 failure: name conflict
-  - given: "A workspace exists and a project named 'eslint-config' already exists"
+  - given: "A monorepo workspace exists and a project named 'eslint-config' already exists"
     when: "Developer runs aikuora add with kind=shareable and name=eslint-config"
     then:
       - "No files are written"
       - "Developer is informed the name conflicts with an existing project"
 
-  # ADD-003 failure: partial creation with cleanup failure
-  - given: "A workspace exists, a shareable tool 'eslint-config' is being created, the operation fails midway and the partial directory cannot be deleted"
+  # ADD-003 failure: partial creation with cleanup failure (monorepo)
+  - given: "A monorepo workspace exists, a shareable tool 'eslint-config' is being created, the operation fails midway and the partial directory cannot be deleted"
     when: "Developer runs aikuora add eslint-config (kind=shareable)"
     then:
       - "Both the original failure and the cleanup failure are reported"
       - "The partial directory is left in place"
       - "Exit code 1 is returned"
       - "Developer is told to manually delete the directory before retrying"
+
+  # ADD-003-SIMPLE happy path
+  - given: "A simple workspace exists; tool 'tsconfig' declares kind=shareable, link.simpleContent='{ compilerOptions: { strict: true } }', and link.simpleFile='tsconfig.json'"
+    when: "Developer runs aikuora add tsconfig in the simple workspace"
+    then:
+      - "tsconfig.json is written at the workspace root with the content from link.simpleContent"
+      - "tsconfig is recorded in aikuora.project.yml at the workspace root"
+      - "No packages/configs/ directory is created"
+
+  # ADD-003-SIMPLE failure: tool has no link.simpleContent
+  - given: "A simple workspace exists; tool 'eslint' declares kind=shareable but has no link.simpleContent"
+    when: "Developer runs aikuora add eslint in the simple workspace"
+    then:
+      - "No files are written"
+      - "Developer is informed: 'tool eslint does not support simple workspace mode'"
+      - "Exit code 1 is returned"
+
+  # ADD-003-SIMPLE edge case: re-link in simple workspace emits warning
+  - given: "A simple workspace exists; tool 'tsconfig' is already recorded in aikuora.project.yml at the workspace root; tsconfig declares link.simpleFile='tsconfig.json'"
+    when: "Developer runs aikuora add tsconfig in the simple workspace"
+    then:
+      - "A warning is emitted: 'tsconfig is already linked to this project'"
+      - "tsconfig.json is re-written with link.simpleContent"
+      - "No duplicate entry is created in aikuora.project.yml"
+
+  # ADD-003-SIMPLE: TOOL-001 catches mismatched link.simpleVariant
+  - given: "A simple workspace exists; tool 'lint' declares kind=shareable, link.simpleVariant='strict', but variants map only contains 'loose'"
+    when: "System calls TOOL-001 to resolve 'lint'"
+    then:
+      - "Resolution fails with: 'tool lint link.simpleVariant \"strict\" does not match any declared variant'"
+      - "No files are written"
 
   # ADD-004 happy path
   - given: "A workspace exists and a tool with kind=root named 'root-config' exists in the registry"
@@ -1275,21 +1673,29 @@ derived_tests:
     then:
       - ".gitignore still contains 'node_modules' exactly once"
 
-  # INFO-001 happy path with .prototools
-  - given: "A workspace with name='acme-mono', scope='@acme', two projects (apps/web kind=app, packages/ui kind=package), .prototools at workspace root defining node = \"22.0.0\""
+  # INFO-001 happy path with .prototools (monorepo)
+  - given: "A monorepo workspace with name='acme-mono', scope='@acme', two projects (apps/web kind=app, packages/ui kind=package), .prototools at workspace root defining node = \"22.0.0\""
     when: "Developer runs aikuora info"
     then:
-      - "Workspace name 'acme-mono' and scope '@acme' are displayed"
+      - "Workspace name 'acme-mono', scope '@acme', and type 'monorepo' are displayed"
       - "Both projects are listed with their kinds and linked tools"
       - "Runtime pin 'node = \"22.0.0\"' from .prototools is displayed"
 
-  # INFO-001 happy path without .prototools
-  - given: "A workspace exists with projects but no .prototools file at the workspace root"
+  # INFO-001 happy path without .prototools (monorepo)
+  - given: "A monorepo workspace exists with projects but no .prototools file at the workspace root"
     when: "Developer runs aikuora info"
     then:
       - "Workspace name and scope are displayed"
       - "Projects and their linked tools are displayed"
       - "The runtime version pins section is silently omitted"
+
+  # INFO-001: simple workspace — root project tools shown, no project table
+  - given: "A simple workspace with name='my-app', scope='@acme', aikuora.project.yml at root with tools=['tsconfig','prettier']"
+    when: "Developer runs aikuora info"
+    then:
+      - "Workspace name 'my-app', scope '@acme', and type 'simple' are displayed"
+      - "No project table is shown"
+      - "The tools linked to the root project (tsconfig, prettier) are displayed"
 
   # INFO-001: root installs not shown
   - given: "A workspace exists with a root tool installation and a regular app project"
@@ -1313,18 +1719,32 @@ derived_tests:
       - "Exit code 0 is returned"
 
   # LIST-001 happy path without --json
-  - given: "A workspace exists with two apps: 'apps/web' and 'apps/admin'"
+  - given: "A monorepo workspace exists with two apps: 'apps/web' and 'apps/admin'"
     when: "Developer runs aikuora list apps"
     then:
       - "Human-readable output listing 'apps/web' and 'apps/admin' is printed"
       - "Exit code 0 is returned"
 
-  # LIST-001 packages includes shareables
-  - given: "A workspace exists with a regular package 'packages/ui' (kind=package) and a shareable 'packages/configs/eslint-config' (kind=shareable)"
+  # LIST-001 packages includes shareables (monorepo)
+  - given: "A monorepo workspace exists with a regular package 'packages/ui' (kind=package) and a shareable 'packages/configs/eslint-config' (kind=shareable)"
     when: "Developer runs aikuora list packages"
     then:
       - "Both 'packages/ui' and 'packages/configs/eslint-config' appear in the output"
       - "Root tool installations are not listed"
+
+  # LIST-001 simple workspace: apps/packages/modules return empty
+  - given: "A simple workspace exists with root project kind=simple and tools=['tsconfig']"
+    when: "Developer runs aikuora list apps"
+    then:
+      - "An empty list is returned (not an error)"
+      - "Exit code 0 is returned"
+
+  # LIST-001 simple workspace: tools returns registry
+  - given: "A simple workspace exists"
+    when: "Developer runs aikuora list tools"
+    then:
+      - "The full tool registry is returned"
+      - "Exit code 0 is returned"
 
   # LIST-001 failure: invalid type
   - given: "A workspace exists"
@@ -1345,11 +1765,11 @@ derived_tests:
 # ---------------------------------------------------------------------------
 
 metadata:
-  version: "1.0.0"
+  version: "1.2.0"
   created: "2026-02-22T00:00:00Z"
-  last_modified: "2026-02-22"
-  last_verified: "2026-02-22"
-  verification_status: "verified"
+  last_modified: "2026-03-03T00:00:00Z"
+  last_verified: "2026-03-03T01:00:00Z"
+  verification_status: "passed"
 
   quality_attributes:
     concurrent_users: "Single developer per terminal session; no concurrency requirements"
@@ -1365,7 +1785,6 @@ metadata:
       - "TypeScript 5"
       - "pnpm 10"
       - "meow (CLI argument parsing)"
-      - "ink + React 18 (terminal UI rendering)"
       - "Handlebars (scaffold template rendering)"
       - "Zod (config schema validation)"
       - "yaml (YAML parsing and serialization)"
@@ -1373,10 +1792,11 @@ metadata:
       - "tsup (build bundler)"
       - "vitest (test runner)"
     integrations:
-      - "moonrepo (workspace task runner target; workspace config at .moon/workspace.yml; inherited tasks at .moon/tasks/<filename>.yml under the tasks: key)"
-      - "prototools (runtime version pin target; .prototools at workspace root in TOML key=value format)"
+      - "moonrepo (workspace task runner target; workspace config at .moon/workspace.yml; inherited tasks at .moon/tasks/<filename>.yml under the tasks: key; simple workspaces use projects: [] in .moon/workspace.yml)"
+      - "prototools (runtime version pin target; .prototools at workspace root in TOML key=value format; python version must match .python-version in Python simple workspaces)"
       - "VSCode (.vscode/settings.json at workspace root)"
       - "Claude (.claude/settings.json at workspace root; hooks array merged by matcher + hooks array content)"
+      - "uv (Python package manager; pyproject.toml in Python simple workspaces includes [tool.uv] section)"
     regulations: []
     timeline: ""
     team_expertise: "TypeScript, Node.js, monorepo tooling (moonrepo, pnpm workspaces)"
@@ -1404,4 +1824,21 @@ metadata:
         invocation of aikuora add <pkg> <target> to wire a shared_config_package
         dependency into an existing project is not implemented in v1. This is
         deferred to a future version.
+      status: "deferred"
+    - item: "python built-in tool must be created as a parallel prerequisite"
+      context: >
+        INIT-002 --lang python requires a built-in python tool in the registry
+        that declares: kind=root, installer=proto, a default version field (e.g.,
+        version: "3.12"), and lang=python. This tool is analogous to the existing
+        node tool. It must be created before INIT-002 --lang python can function.
+        The spec is complete; this is a parallel implementation task. Until the
+        tool exists, INIT-002 --lang python will fail with a registry error as
+        specified in on_failure.
+      status: "deferred"
+    - item: "--base flag support for aikuora init (monorepo)"
+      context: >
+        The --base flag is currently specified only for aikuora init simple
+        in v1. A future version may support --base for monorepo init as well,
+        allowing monorepo workspaces to auto-wire devtools at init time.
+        Deferred to a future spec refinement.
       status: "deferred"
